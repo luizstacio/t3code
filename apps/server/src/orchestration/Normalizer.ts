@@ -33,7 +33,11 @@ export const canonicalizeClientCommandTimestamps = (
           ...command,
           createdAt: receivedAt,
         }
-      : command;
+      : "updatedAt" in command
+        ? { ...command, updatedAt: receivedAt }
+        : "deletedAt" in command
+          ? { ...command, deletedAt: receivedAt }
+          : command;
 
   if (canonicalCommand.type !== "thread.turn.start" || !canonicalCommand.bootstrap?.createThread) {
     return canonicalCommand;

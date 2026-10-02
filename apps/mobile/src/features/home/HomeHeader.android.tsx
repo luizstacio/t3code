@@ -18,6 +18,27 @@ export function HomeHeader(props: HomeHeaderProps) {
     props.selectedEnvironmentId !== null || props.selectedProjectKey !== null;
   const menuActions = useMemo<MenuAction[]>(
     () => [
+      ...(props.organizationWorkspaces.length === 0
+        ? []
+        : ([
+            {
+              id: "workspace",
+              title: "Workspace",
+              subactions: props.organizationWorkspaces
+                .map((workspace) => ({
+                  id: `workspace:${workspace.id}`,
+                  title: workspace.name,
+                  state: checkedMenuState(props.selectedOrganizationWorkspaceId === workspace.id),
+                }))
+                .concat([
+                  { id: "workspace:create", title: "New workspace…", state: undefined },
+                  { id: "folder:create", title: "New folder…", state: undefined },
+                ]),
+            },
+          ] satisfies MenuAction[])),
+      ...(props.organizationWorkspaces.length === 0
+        ? ([{ id: "workspace:create", title: "New workspace…" }] satisfies MenuAction[])
+        : []),
       {
         id: "environment",
         title: "Environment",
@@ -54,12 +75,56 @@ export function HomeHeader(props: HomeHeaderProps) {
               ],
             },
           ] satisfies MenuAction[])),
+      ...(props.selectedProjectKey === null || props.organizationFolders.length === 0
+        ? []
+        : ([
+            {
+              id: "project-folder",
+              title: "Move project to folder",
+              subactions: props.organizationFolders.map((folder) => ({
+                id: `project-folder:${folder.id}`,
+                title: folder.name,
+              })),
+            },
+          ] satisfies MenuAction[])),
     ],
-    [props.environments, props.projects, props.selectedEnvironmentId, props.selectedProjectKey],
+    [
+      props.environments,
+      props.organizationWorkspaces,
+      props.organizationFolders,
+      props.projects,
+      props.selectedEnvironmentId,
+      props.selectedOrganizationWorkspaceId,
+      props.selectedProjectKey,
+    ],
   );
   const handleMenuAction = useCallback(
     (event: { nativeEvent: { event: string } }) => {
       const id = event.nativeEvent.event;
+      if (id.startsWith("project-folder:")) {
+        const folderId = id.slice("project-folder:".length);
+        const folder = props.organizationFolders.find((candidate) => candidate.id === folderId);
+        if (folder && props.selectedProjectKey !== null) {
+          props.onMoveProjectToOrganizationFolder(props.selectedProjectKey, folder.id);
+        }
+        return;
+      }
+      if (id === "workspace:create") {
+        props.onCreateOrganizationWorkspace();
+        return;
+      }
+      if (id === "folder:create") {
+        props.onCreateOrganizationFolder();
+        return;
+      }
+      if (id.startsWith("workspace:")) {
+        const workspaceId = id.slice("workspace:".length);
+        const workspace = props.organizationWorkspaces.find(
+          (candidate) => candidate.id === workspaceId,
+        );
+        if (workspace) props.onOrganizationWorkspaceChange(workspace.id);
+        return;
+      }
       if (id === "environment:all") {
         props.onEnvironmentChange(null);
         return;

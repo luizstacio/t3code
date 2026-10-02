@@ -1,4 +1,8 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  OrganizationFolderId,
+  OrganizationWorkspaceId,
+} from "@t3tools/contracts";
 
 export interface HomeListFilterMenuEnvironment {
   readonly environmentId: EnvironmentId;
@@ -30,14 +34,67 @@ export interface HomeListFilterMenu {
 }
 
 export function buildHomeListFilterMenu(props: {
+  readonly organizationWorkspaces: ReadonlyArray<{
+    readonly id: OrganizationWorkspaceId;
+    readonly name: string;
+  }>;
+  readonly selectedOrganizationWorkspaceId: OrganizationWorkspaceId | null;
+  readonly organizationFolders: ReadonlyArray<{
+    readonly id: OrganizationFolderId;
+    readonly name: string;
+  }>;
   readonly environments: ReadonlyArray<HomeListFilterMenuEnvironment>;
   readonly projects: ReadonlyArray<HomeListFilterMenuProject>;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
+  readonly onOrganizationWorkspaceChange: (workspaceId: OrganizationWorkspaceId) => void;
+  readonly onCreateOrganizationFolder: () => void;
+  readonly onCreateOrganizationWorkspace: () => void;
+  readonly onMoveProjectToOrganizationFolder: (
+    projectKey: string,
+    folderId: OrganizationFolderId,
+  ) => void;
 }): HomeListFilterMenu {
   const items: Array<HomeListFilterMenuAction | HomeListFilterMenuSubmenu> = [];
+
+  if (props.organizationWorkspaces.length > 0) {
+    items.push({
+      type: "submenu",
+      title: "Workspace",
+      items: props.organizationWorkspaces
+        .map((workspace) => ({
+          type: "action" as const,
+          title: workspace.name,
+          state:
+            props.selectedOrganizationWorkspaceId === workspace.id
+              ? ("on" as const)
+              : ("off" as const),
+          onPress: () => props.onOrganizationWorkspaceChange(workspace.id),
+        }))
+        .concat([
+          {
+            type: "action" as const,
+            title: "New workspace…",
+            state: "off" as const,
+            onPress: props.onCreateOrganizationWorkspace,
+          },
+          {
+            type: "action" as const,
+            title: "New folder…",
+            state: "off" as const,
+            onPress: props.onCreateOrganizationFolder,
+          },
+        ]),
+    });
+  } else {
+    items.push({
+      type: "action",
+      title: "New workspace…",
+      onPress: props.onCreateOrganizationWorkspace,
+    });
+  }
 
   items.push({
     type: "submenu",
@@ -81,6 +138,19 @@ export function buildHomeListFilterMenu(props: {
           onPress: () => props.onProjectChange(project.key),
         })),
       ],
+    });
+  }
+
+  if (props.selectedProjectKey !== null && props.organizationFolders.length > 0) {
+    items.push({
+      type: "submenu",
+      title: "Move project to folder",
+      items: props.organizationFolders.map((folder) => ({
+        type: "action",
+        title: folder.name,
+        onPress: () =>
+          props.onMoveProjectToOrganizationFolder(props.selectedProjectKey!, folder.id),
+      })),
     });
   }
 

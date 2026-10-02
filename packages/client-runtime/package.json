@@ -147,6 +147,10 @@
       "types": "./src/state/orchestration.ts",
       "default": "./src/state/orchestration.ts"
     },
+    "./state/organization": {
+      "types": "./src/state/organization.ts",
+      "default": "./src/state/organization.ts"
+    },
     "./state/presentation": {
       "types": "./src/state/presentation.ts",
       "default": "./src/state/presentation.ts"

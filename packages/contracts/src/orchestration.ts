@@ -15,6 +15,9 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrganizationFolderId,
+  OrganizationMembershipId,
+  OrganizationWorkspaceId,
   PositiveInt,
   ProjectId,
   ProviderItemId,
@@ -23,6 +26,13 @@ import {
   TrimmedString,
   TurnId,
 } from "./baseSchemas.ts";
+import {
+  OrganizationFolder,
+  OrganizationItemReference,
+  OrganizationMembership,
+  OrganizationState,
+  OrganizationWorkspace,
+} from "./organization.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   PullRequestActor,
@@ -860,6 +870,7 @@ export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  organization: Schema.optional(OrganizationState),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -947,6 +958,7 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
+  organization: Schema.optional(OrganizationState),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -971,6 +983,11 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("thread-removed"),
     sequence: NonNegativeInt,
     threadId: ThreadId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("organization-updated"),
+    sequence: NonNegativeInt,
+    organization: OrganizationState,
   }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
@@ -1092,6 +1109,75 @@ export const ProjectCreateCommand = Schema.Struct({
   // server ignores it; explicit project defaults use project.meta.update.
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   createdAt: IsoDateTime,
+});
+
+const OrganizationWorkspaceCreateCommand = Schema.Struct({
+  type: Schema.Literal("organization.workspace.create"),
+  commandId: CommandId,
+  workspaceId: OrganizationWorkspaceId,
+  name: TrimmedNonEmptyString,
+  orderKey: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const OrganizationWorkspaceUpdateCommand = Schema.Struct({
+  type: Schema.Literal("organization.workspace.update"),
+  commandId: CommandId,
+  workspaceId: OrganizationWorkspaceId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  orderKey: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
+const OrganizationWorkspaceDeleteCommand = Schema.Struct({
+  type: Schema.Literal("organization.workspace.delete"),
+  commandId: CommandId,
+  workspaceId: OrganizationWorkspaceId,
+  deletedAt: IsoDateTime,
+});
+
+const OrganizationFolderCreateCommand = Schema.Struct({
+  type: Schema.Literal("organization.folder.create"),
+  commandId: CommandId,
+  folderId: OrganizationFolderId,
+  workspaceId: OrganizationWorkspaceId,
+  name: TrimmedNonEmptyString,
+  orderKey: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const OrganizationFolderUpdateCommand = Schema.Struct({
+  type: Schema.Literal("organization.folder.update"),
+  commandId: CommandId,
+  folderId: OrganizationFolderId,
+  workspaceId: Schema.optional(OrganizationWorkspaceId),
+  name: Schema.optional(TrimmedNonEmptyString),
+  orderKey: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
+const OrganizationFolderDeleteCommand = Schema.Struct({
+  type: Schema.Literal("organization.folder.delete"),
+  commandId: CommandId,
+  folderId: OrganizationFolderId,
+  deletedAt: IsoDateTime,
+});
+
+const OrganizationMembershipUpsertCommand = Schema.Struct({
+  type: Schema.Literal("organization.membership.upsert"),
+  commandId: CommandId,
+  membershipId: OrganizationMembershipId,
+  folderId: OrganizationFolderId,
+  item: OrganizationItemReference,
+  orderKey: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+const OrganizationMembershipDeleteCommand = Schema.Struct({
+  type: Schema.Literal("organization.membership.delete"),
+  commandId: CommandId,
+  membershipId: OrganizationMembershipId,
+  deletedAt: IsoDateTime,
 });
 
 const ProjectMetaUpdateCommand = Schema.Struct({
@@ -1425,6 +1511,14 @@ const ThreadSessionStopCommand = Schema.Struct({
 });
 
 const DispatchableClientOrchestrationCommand = Schema.Union([
+  OrganizationWorkspaceCreateCommand,
+  OrganizationWorkspaceUpdateCommand,
+  OrganizationWorkspaceDeleteCommand,
+  OrganizationFolderCreateCommand,
+  OrganizationFolderUpdateCommand,
+  OrganizationFolderDeleteCommand,
+  OrganizationMembershipUpsertCommand,
+  OrganizationMembershipDeleteCommand,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -1459,6 +1553,14 @@ export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
 
 export const ClientOrchestrationCommand = Schema.Union([
+  OrganizationWorkspaceCreateCommand,
+  OrganizationWorkspaceUpdateCommand,
+  OrganizationWorkspaceDeleteCommand,
+  OrganizationFolderCreateCommand,
+  OrganizationFolderUpdateCommand,
+  OrganizationFolderDeleteCommand,
+  OrganizationMembershipUpsertCommand,
+  OrganizationMembershipDeleteCommand,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -1688,6 +1790,14 @@ export const OrchestrationCommand = Schema.Union([
 export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 
 export const OrchestrationEventType = Schema.Literals([
+  "organization.workspace-created",
+  "organization.workspace-updated",
+  "organization.workspace-deleted",
+  "organization.folder-created",
+  "organization.folder-updated",
+  "organization.folder-deleted",
+  "organization.membership-upserted",
+  "organization.membership-deleted",
   "project.created",
   "project.meta-updated",
   "project.deleted",
@@ -1724,9 +1834,51 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals(["organization", "project", "thread"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
+
+export const OrganizationWorkspaceCreatedPayload = Schema.Struct({
+  workspace: OrganizationWorkspace,
+});
+
+export const OrganizationWorkspaceUpdatedPayload = Schema.Struct({
+  workspaceId: OrganizationWorkspaceId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  orderKey: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
+export const OrganizationWorkspaceDeletedPayload = Schema.Struct({
+  workspaceId: OrganizationWorkspaceId,
+  deletedAt: IsoDateTime,
+});
+
+export const OrganizationFolderCreatedPayload = Schema.Struct({
+  folder: OrganizationFolder,
+});
+
+export const OrganizationFolderUpdatedPayload = Schema.Struct({
+  folderId: OrganizationFolderId,
+  workspaceId: Schema.optional(OrganizationWorkspaceId),
+  name: Schema.optional(TrimmedNonEmptyString),
+  orderKey: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
+export const OrganizationFolderDeletedPayload = Schema.Struct({
+  folderId: OrganizationFolderId,
+  deletedAt: IsoDateTime,
+});
+
+export const OrganizationMembershipUpsertedPayload = Schema.Struct({
+  membership: OrganizationMembership,
+});
+
+export const OrganizationMembershipDeletedPayload = Schema.Struct({
+  membershipId: OrganizationMembershipId,
+  deletedAt: IsoDateTime,
+});
 
 export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
@@ -2033,7 +2185,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([Schema.Literal("organization"), ProjectId, ThreadId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -2042,6 +2194,46 @@ const EventBaseFields = {
 } as const;
 
 export const OrchestrationEvent = Schema.Union([
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("organization.workspace-created"),
+    payload: OrganizationWorkspaceCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("organization.workspace-updated"),
+    payload: OrganizationWorkspaceUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("organization.workspace-deleted"),
+    payload: OrganizationWorkspaceDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("organization.folder-created"),
+    payload: OrganizationFolderCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("organization.folder-updated"),
+    payload: OrganizationFolderUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("organization.folder-deleted"),
+    payload: OrganizationFolderDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("organization.membership-upserted"),
+    payload: OrganizationMembershipUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("organization.membership-deleted"),
+    payload: OrganizationMembershipDeletedPayload,
+  }),
   Schema.Struct({
     ...EventBaseFields,
     type: Schema.Literal("project.created"),

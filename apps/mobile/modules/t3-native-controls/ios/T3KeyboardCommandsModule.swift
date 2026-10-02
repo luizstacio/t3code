@@ -52,6 +52,9 @@ public final class T3KeyboardCommandsView: ExpoView {
         title: "Copy PR Link or Thread ID"
       ),
       enabledCommand("toggleSidebar", input: "\\", modifiers: .command, action: #selector(handleToggleSidebar), title: "Toggle Sidebar"),
+      enabledCommand("organizationWorkspace.previous", input: "[", modifiers: [.command, .alternate], action: #selector(previousWorkspace), title: "Previous Workspace"),
+      enabledCommand("organizationWorkspace.next", input: "]", modifiers: [.command, .alternate], action: #selector(nextWorkspace), title: "Next Workspace"),
+      enabledCommand("organizationWorkspace.picker", input: "w", modifiers: [.command, .alternate], action: #selector(pickWorkspace), title: "Switch Workspace"),
     ].compactMap { $0 }
     if isPad {
       commands += (1...9).compactMap { index in
@@ -61,6 +64,15 @@ public final class T3KeyboardCommandsView: ExpoView {
           modifiers: .command,
           action: #selector(jumpToThread(_:)),
           title: "Go to Thread \(index)"
+        )
+      }
+      commands += (1...9).compactMap { index in
+        enabledCommand(
+          "organizationWorkspace.jump.\(index)",
+          input: String(index),
+          modifiers: [.command, .alternate],
+          action: #selector(jumpToWorkspace(_:)),
+          title: "Go to Workspace \(index)"
         )
       }
     }
@@ -150,6 +162,13 @@ public final class T3KeyboardCommandsView: ExpoView {
   @objc private func openReview() { emit("review") }
   @objc private func copyThreadReference() { emit("copyThreadReference") }
   @objc private func handleToggleSidebar() { emit("toggleSidebar") }
+  @objc private func previousWorkspace() { emit("organizationWorkspace.previous") }
+  @objc private func nextWorkspace() { emit("organizationWorkspace.next") }
+  @objc private func pickWorkspace() { emit("organizationWorkspace.picker") }
+  @objc private func jumpToWorkspace(_ sender: UIKeyCommand) {
+    guard let input = sender.input else { return }
+    emit("organizationWorkspace.jump.\(input)")
+  }
 
   private func emit(_ command: String) {
     onCommand(["command": command])

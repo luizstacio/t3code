@@ -22,6 +22,12 @@ import {
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import {
+  filterOrganizationWorkspaceContent,
+  selectOrganizationWorkspace,
+  sortOrganizationWorkspaces,
+} from "@t3tools/client-runtime/state/organization";
+import {
+  pinOrderKeyBetween,
   resolveSettledThreadTimestamp,
   sortSettledThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
@@ -40,6 +46,10 @@ import {
   resolveEnvironmentMachineKind,
   type EnvironmentMachineKind,
   type ProjectIconOverride,
+  OrganizationFolderId,
+  OrganizationMembershipId,
+  OrganizationWorkspaceId,
+  type OrganizationItemReference,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -55,6 +65,7 @@ import {
   ClockIcon,
   EyeIcon,
   FolderIcon,
+  FolderPlusIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
@@ -101,9 +112,10 @@ import {
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { isEditableFocused } from "../lib/editableFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { isMacPlatform } from "~/lib/utils";
+import { isMacPlatform, randomUUID } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
@@ -141,6 +153,7 @@ import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../s
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
+import { organizationEnvironment, usePrimaryOrganizationState } from "../state/organization";
 import { useThreadSearch } from "../state/queries";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
@@ -2215,9 +2228,43 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 });
 
 export default function Sidebar() {
-  const projects = useProjects();
+  const allProjects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const threads = useThreadShells();
+  const allThreads = useThreadShells();
+  const organization = usePrimaryOrganizationState();
+  const savedWorkspaceId = useUiStateStore((store) => store.activeOrganizationWorkspaceId);
+  const setActiveWorkspaceId = useUiStateStore((store) => store.setActiveOrganizationWorkspaceId);
+  const orderedWorkspaces = useMemo(
+    () => sortOrganizationWorkspaces(organization.workspaces),
+    [organization.workspaces],
+  );
+  const activeWorkspaceId =
+    orderedWorkspaces.find(({ id }) => id === savedWorkspaceId)?.id ??
+    orderedWorkspaces[0]?.id ??
+    null;
+  useEffect(() => {
+    if (activeWorkspaceId !== savedWorkspaceId) {
+      setActiveWorkspaceId(activeWorkspaceId);
+    }
+  }, [activeWorkspaceId, savedWorkspaceId, setActiveWorkspaceId]);
+  const activeWorkspace = useMemo(
+    () =>
+      activeWorkspaceId === null
+        ? null
+        : selectOrganizationWorkspace(
+            organization,
+            OrganizationWorkspaceId.make(activeWorkspaceId),
+          ),
+    [activeWorkspaceId, organization],
+  );
+  const { projects, threads } = useMemo(() => {
+    return filterOrganizationWorkspaceContent({
+      state: organization,
+      workspaceId: activeWorkspace?.workspace.id ?? null,
+      projects: allProjects,
+      threads: allThreads,
+    });
+  }, [activeWorkspace, allProjects, allThreads, organization]);
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -2306,6 +2353,175 @@ export default function Sidebar() {
   );
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const createOrganizationWorkspace = useAtomCommand(organizationEnvironment.createWorkspace);
+  const createOrganizationFolder = useAtomCommand(organizationEnvironment.createFolder);
+  const updateOrganizationWorkspace = useAtomCommand(organizationEnvironment.updateWorkspace);
+  const deleteOrganizationWorkspace = useAtomCommand(organizationEnvironment.deleteWorkspace);
+  const updateOrganizationFolder = useAtomCommand(organizationEnvironment.updateFolder);
+  const deleteOrganizationFolder = useAtomCommand(organizationEnvironment.deleteFolder);
+  const upsertOrganizationMembership = useAtomCommand(organizationEnvironment.upsertMembership);
+  const handleCreateOrganizationWorkspace = useCallback(async () => {
+    if (primaryEnvironmentId === null) return;
+    const name = window.prompt("Workspace name")?.trim();
+    if (!name) return;
+    const workspaceId = OrganizationWorkspaceId.make(randomUUID());
+    const lastWorkspace = orderedWorkspaces.at(-1);
+    const result = await createOrganizationWorkspace({
+      environmentId: primaryEnvironmentId,
+      input: {
+        workspaceId,
+        name,
+        orderKey: pinOrderKeyBetween(lastWorkspace?.orderKey ?? null, null) ?? randomUUID(),
+      },
+    });
+    if (result._tag === "Success") setActiveWorkspaceId(workspaceId);
+  }, [createOrganizationWorkspace, orderedWorkspaces, primaryEnvironmentId, setActiveWorkspaceId]);
+  const handleCreateOrganizationFolder = useCallback(async () => {
+    if (primaryEnvironmentId === null || activeWorkspace === null) return;
+    const name = window.prompt("Folder name")?.trim();
+    if (!name) return;
+    const lastFolder = activeWorkspace.folders.at(-1)?.folder;
+    await createOrganizationFolder({
+      environmentId: primaryEnvironmentId,
+      input: {
+        folderId: OrganizationFolderId.make(randomUUID()),
+        workspaceId: activeWorkspace.workspace.id,
+        name,
+        orderKey: pinOrderKeyBetween(lastFolder?.orderKey ?? null, null) ?? randomUUID(),
+      },
+    });
+  }, [activeWorkspace, createOrganizationFolder, primaryEnvironmentId]);
+  const moveOrganizationItem = useCallback(
+    async (item: OrganizationItemReference, folderId: OrganizationFolderId) => {
+      if (primaryEnvironmentId === null || activeWorkspace === null) return;
+      const existing = organization.memberships.find((membership) =>
+        membership.item.kind === "project" && item.kind === "project"
+          ? membership.item.environmentId === item.environmentId &&
+            membership.item.projectId === item.projectId
+          : membership.item.kind === "thread" && item.kind === "thread"
+            ? membership.item.environmentId === item.environmentId &&
+              membership.item.threadId === item.threadId
+            : false,
+      );
+      const folder = activeWorkspace.folders.find((entry) => entry.folder.id === folderId);
+      if (!folder) return;
+      await upsertOrganizationMembership({
+        environmentId: primaryEnvironmentId,
+        input: {
+          membershipId: existing?.id ?? OrganizationMembershipId.make(randomUUID()),
+          folderId,
+          item,
+          orderKey:
+            pinOrderKeyBetween(folder.memberships.at(-1)?.orderKey ?? null, null) ?? randomUUID(),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    },
+    [activeWorkspace, organization.memberships, primaryEnvironmentId, upsertOrganizationMembership],
+  );
+  const handleManageOrganizationWorkspace = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      if (primaryEnvironmentId === null || activeWorkspace === null) return;
+      const position = { x: event.clientX, y: event.clientY };
+      void (async () => {
+        const api = readLocalApi();
+        if (!api) return;
+        const clicked = await api.contextMenu.show(
+          [
+            { id: "workspace:rename", label: "Rename workspace", icon: "pencil" },
+            { id: "folder:create", label: "New folder", icon: "folder-plus" },
+            ...activeWorkspace.folders.map((folder) => ({
+              id: `folder:${folder.folder.id}`,
+              label: folder.folder.name,
+              icon: "folder",
+              children: [
+                { id: `folder:rename:${folder.folder.id}`, label: "Rename", icon: "pencil" },
+                {
+                  id: `folder:delete:${folder.folder.id}`,
+                  label: "Delete folder",
+                  icon: "trash",
+                  destructive: true,
+                },
+              ],
+            })),
+            {
+              id: "workspace:delete",
+              label: "Delete workspace",
+              icon: "trash",
+              destructive: true,
+              separatorBefore: true,
+            },
+          ],
+          position,
+        );
+        if (clicked === "workspace:rename") {
+          const name = window.prompt("Workspace name", activeWorkspace.workspace.name)?.trim();
+          if (!name || name === activeWorkspace.workspace.name) return;
+          await updateOrganizationWorkspace({
+            environmentId: primaryEnvironmentId,
+            input: {
+              workspaceId: activeWorkspace.workspace.id,
+              name,
+              updatedAt: new Date().toISOString(),
+            },
+          });
+          return;
+        }
+        if (clicked === "folder:create") {
+          await handleCreateOrganizationFolder();
+          return;
+        }
+        if (clicked?.startsWith("folder:rename:")) {
+          const folder = activeWorkspace.folders.find(
+            (entry) => entry.folder.id === clicked.slice("folder:rename:".length),
+          )?.folder;
+          if (!folder) return;
+          const name = window.prompt("Folder name", folder.name)?.trim();
+          if (!name || name === folder.name) return;
+          await updateOrganizationFolder({
+            environmentId: primaryEnvironmentId,
+            input: { folderId: folder.id, name, updatedAt: new Date().toISOString() },
+          });
+          return;
+        }
+        if (clicked?.startsWith("folder:delete:")) {
+          const folderId = OrganizationFolderId.make(clicked.slice("folder:delete:".length));
+          const confirmed = await api.dialogs.confirm(
+            "Delete this folder? Projects and threads stay intact; only its assignments are removed.",
+            { variant: "destructive" },
+          );
+          if (!confirmed) return;
+          await deleteOrganizationFolder({
+            environmentId: primaryEnvironmentId,
+            input: { folderId, deletedAt: new Date().toISOString() },
+          });
+          return;
+        }
+        if (clicked !== "workspace:delete") return;
+        const confirmed = await api.dialogs.confirm(
+          "Delete this workspace? Projects, threads, and running agents stay intact; only its folders and assignments are removed.",
+          { variant: "destructive" },
+        );
+        if (!confirmed) return;
+        await deleteOrganizationWorkspace({
+          environmentId: primaryEnvironmentId,
+          input: {
+            workspaceId: activeWorkspace.workspace.id,
+            deletedAt: new Date().toISOString(),
+          },
+        });
+      })();
+    },
+    [
+      activeWorkspace,
+      deleteOrganizationFolder,
+      deleteOrganizationWorkspace,
+      handleCreateOrganizationFolder,
+      primaryEnvironmentId,
+      updateOrganizationFolder,
+      updateOrganizationWorkspace,
+    ],
+  );
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
@@ -2579,6 +2795,73 @@ export default function Sidebar() {
       openProjectSettings(projectGroup);
     },
     [openProjectSettings],
+  );
+  const handleProjectContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLElement>, projectGroup: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressNextScopeChangeRef.current = true;
+      dispatchProjectScopeMenu({ type: "project-settings-opened" });
+      void (async () => {
+        const api = readLocalApi();
+        if (!api) return;
+        const folders = activeWorkspace?.folders ?? [];
+        const clicked = await settlePromise(() =>
+          api.contextMenu.show(
+            [
+              ...(folders.length
+                ? [
+                    {
+                      id: "organization-folder",
+                      label: "Move to folder",
+                      icon: "folder-tree",
+                      children: folders.map((folder) => ({
+                        id: `organization-folder:${folder.folder.id}`,
+                        label: folder.folder.name,
+                        checked: projectGroup.memberProjectRefs.every((projectRef) =>
+                          folder.memberships.some(
+                            (membership) =>
+                              membership.item.kind === "project" &&
+                              membership.item.environmentId === projectRef.environmentId &&
+                              membership.item.projectId === projectRef.projectId,
+                          ),
+                        ),
+                      })),
+                    },
+                  ]
+                : []),
+              {
+                id: "project-settings",
+                label: "Project settings",
+                icon: "settings",
+                separatorBefore: folders.length > 0,
+              },
+            ],
+            { x: event.clientX, y: event.clientY },
+          ),
+        );
+        if (clicked._tag === "Failure") return;
+        if (clicked.value === "project-settings") {
+          openProjectSettings(projectGroup);
+          return;
+        }
+        if (!clicked.value?.startsWith("organization-folder:")) return;
+        const folderId = OrganizationFolderId.make(
+          clicked.value.slice("organization-folder:".length),
+        );
+        for (const projectRef of projectGroup.memberProjectRefs) {
+          await moveOrganizationItem(
+            {
+              kind: "project",
+              environmentId: projectRef.environmentId,
+              projectId: projectRef.projectId,
+            },
+            folderId,
+          );
+        }
+      })();
+    },
+    [activeWorkspace, moveOrganizationItem, openProjectSettings],
   );
 
   // Keep a dropped row at its destination while its server applies the
@@ -4226,6 +4509,20 @@ export default function Sidebar() {
                     isActive: projectScopeKey === threadProjectGroup.projectKey,
                   }
                 : null,
+              ...(activeWorkspace === null
+                ? {}
+                : {
+                    organizationFolders: activeWorkspace.folders.map((folder) => ({
+                      id: folder.folder.id,
+                      label: folder.folder.name,
+                      checked: folder.memberships.some(
+                        (membership) =>
+                          membership.item.kind === "thread" &&
+                          membership.item.environmentId === thread.environmentId &&
+                          membership.item.threadId === thread.id,
+                      ),
+                    })),
+                  }),
               isPinned,
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
@@ -4247,6 +4544,17 @@ export default function Sidebar() {
           ),
         );
         if (clicked._tag === "Failure") return;
+        if (clicked.value?.startsWith("organization-folder:")) {
+          await moveOrganizationItem(
+            {
+              kind: "thread",
+              environmentId: thread.environmentId,
+              threadId: thread.id,
+            },
+            OrganizationFolderId.make(clicked.value.slice("organization-folder:".length)),
+          );
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -4446,6 +4754,8 @@ export default function Sidebar() {
       copyThreadIdToClipboard,
       deleteThread,
       handleMultiSelectContextMenu,
+      moveOrganizationItem,
+      activeWorkspace,
       markThreadUnread,
       openProjectSettings,
       projectScopeKey,
@@ -4477,6 +4787,7 @@ export default function Sidebar() {
           terminalFocus: isTerminalFocused(),
           terminalOpen: routeTerminalOpen,
           modelPickerOpen: isModelPickerOpen(),
+          editableFocus: isEditableFocused(event.target),
         },
       });
       const navigateToThreadKey = (targetThreadKey: string | null) => {
@@ -4581,6 +4892,60 @@ export default function Sidebar() {
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
           <SidebarGroup className="z-[1]">
+            {primaryEnvironmentId !== null ? (
+              <div className="mb-1 flex min-w-0 items-center gap-2 px-2">
+                {activeWorkspace !== null ? (
+                  <>
+                    <label htmlFor="organization-workspace" className="sr-only">
+                      Workspace
+                    </label>
+                    <select
+                      id="organization-workspace"
+                      value={activeWorkspace.workspace.id}
+                      onChange={(event) => setActiveWorkspaceId(event.currentTarget.value)}
+                      className="h-7 min-w-0 flex-1 rounded-md border border-sidebar-border bg-sidebar px-2 text-xs text-sidebar-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {orderedWorkspaces.map((workspace) => (
+                        <option key={workspace.id} value={workspace.id}>
+                          {workspace.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      title="Create folder"
+                      aria-label="Create folder"
+                      onClick={() => void handleCreateOrganizationFolder()}
+                    >
+                      <FolderPlusIcon />
+                    </Button>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      title="Manage workspace"
+                      aria-label="Manage workspace"
+                      onClick={handleManageOrganizationWorkspace}
+                    >
+                      <SettingsIcon />
+                    </Button>
+                  </>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-xs text-sidebar-muted-foreground">
+                    No workspaces
+                  </span>
+                )}
+                <Button
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  title="Create workspace"
+                  aria-label="Create workspace"
+                  onClick={() => void handleCreateOrganizationWorkspace()}
+                >
+                  <PlusIcon />
+                </Button>
+              </div>
+            ) : null}
             <SidebarThreadHeader
               searchFieldRef={headerSearchRef}
               hasProjects={projectGroups.length > 0}
@@ -4677,7 +5042,7 @@ export default function Sidebar() {
                             hideIndicator
                             value={item}
                             onContextMenu={(event) => {
-                              if (project) handleProjectSettings(event, project);
+                              if (project) handleProjectContextMenu(event, project);
                             }}
                           >
                             {project ? (

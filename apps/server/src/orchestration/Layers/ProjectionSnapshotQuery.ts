@@ -2,6 +2,7 @@ import {
   AgentSessionImportSource,
   ApprovalRequestId,
   ChatAttachment,
+  EMPTY_ORGANIZATION_STATE,
   OrchestrationMessageContext,
   CheckpointRef,
   IsoDateTime,
@@ -28,6 +29,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
   ModelSelection,
+  OrganizationState,
   ProjectId,
   ThreadLinkedPullRequest,
   ThreadTitleState,
@@ -173,6 +175,10 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
 });
 const ProjectionStateDbRowSchema = ProjectionState;
+const ProjectionOrganizationRowSchema = Schema.Struct({
+  state: Schema.fromJsonString(OrganizationState),
+  updatedAt: IsoDateTime,
+});
 const ProjectionCountsRowSchema = Schema.Struct({
   projectCount: Schema.Number,
   threadCount: Schema.Number,
@@ -497,6 +503,29 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const repositoryIdentityResolutionConcurrency = 4;
+  const getOrganizationStateRow = SqlSchema.findOneOption({
+    Request: Schema.Void,
+    Result: ProjectionOrganizationRowSchema,
+    execute: () => sql`
+      SELECT
+        state_json AS "state",
+        updated_at AS "updatedAt"
+      FROM projection_organization
+      WHERE singleton = 1
+    `,
+  });
+  const getOrganizationState = () =>
+    getOrganizationStateRow(undefined).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getOrganizationState:query",
+          "ProjectionSnapshotQuery.getOrganizationState:decodeRow",
+        ),
+      ),
+      Effect.map(
+        Option.match({ onNone: () => EMPTY_ORGANIZATION_STATE, onSome: (row) => row.state }),
+      ),
+    );
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
     "ProjectionSnapshotQuery.resolveRepositoryIdentitiesForProjects",
   )(function* (
@@ -2191,6 +2220,7 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          getOrganizationState(),
         ]),
       )
       .pipe(
@@ -2206,6 +2236,7 @@ pending_approval_requests AS (
             checkpointRows,
             latestTurnRows,
             stateRows,
+            organization,
           ]) =>
             Effect.gen(function* () {
               const messagesByThread = new Map<string, Array<OrchestrationMessage>>();
@@ -2406,6 +2437,7 @@ pending_approval_requests AS (
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
+                organization,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
 
@@ -2484,6 +2516,7 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          getOrganizationState(),
         ]),
       )
       .pipe(
@@ -2496,6 +2529,7 @@ pending_approval_requests AS (
             sessionRows,
             latestTurnRows,
             stateRows,
+            organization,
           ]) =>
             Effect.gen(function* () {
               const linkedThreadIds = new Set(pullRequestRows.map((row) => row.threadId));
@@ -2653,6 +2687,7 @@ pending_approval_requests AS (
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
+                organization,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
             }),
@@ -2718,11 +2753,20 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          getOrganizationState(),
         ]),
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, sessionRows, pullRequestRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            threadRows,
+            sessionRows,
+            pullRequestRows,
+            latestTurnRows,
+            stateRows,
+            organization,
+          ]) =>
             Effect.gen(function* () {
               let updatedAt: string | null = null;
               for (const row of projectRows) {
@@ -2813,6 +2857,7 @@ pending_approval_requests AS (
                       } satisfies OrchestrationThreadShell)
                     : Result.failVoid,
                 ),
+                organization,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationShellSnapshot;
             }),

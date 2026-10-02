@@ -32,6 +32,7 @@ import {
   ClientWebDeployment,
   CommandId,
   type DiscoveredLocalServerList,
+  EMPTY_ORGANIZATION_STATE,
   EventId,
   type EditorId,
   type FileManagerRevealKind,
@@ -855,6 +856,15 @@ const makeWsRpcLayer = (
         event: ShellEvent,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
         switch (event.type) {
+          case "organization.workspace-created":
+          case "organization.workspace-updated":
+          case "organization.workspace-deleted":
+          case "organization.folder-created":
+          case "organization.folder-updated":
+          case "organization.folder-deleted":
+          case "organization.membership-upserted":
+          case "organization.membership-deleted":
+            return organizationUpdated(event.sequence);
           case "project.created":
           case "project.meta-updated":
             return projectUpsertOrRemove(ProjectId.make(event.aggregateId), event.sequence);
@@ -887,7 +897,7 @@ const makeWsRpcLayer = (
       // If both attempts fail, log and drop the stream item; treating an error as
       // a missing row would incorrectly remove a still-active aggregate.
       const retryShellProjectionRead = <A, E>(
-        aggregateKind: "project" | "thread",
+        aggregateKind: "organization" | "project" | "thread",
         aggregateId: string,
         read: Effect.Effect<A, E>,
       ): Effect.Effect<Option.Option<A>, never, never> =>
@@ -902,6 +912,25 @@ const makeWsRpcLayer = (
             }),
           ),
           Effect.orElseSucceed(() => Option.none()),
+        );
+
+      const organizationUpdated = (
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "organization",
+          "organization",
+          projectionSnapshotQuery
+            .getShellSnapshot()
+            .pipe(Effect.map((snapshot) => snapshot.organization ?? EMPTY_ORGANIZATION_STATE)),
+        ).pipe(
+          Effect.map(
+            Option.map((organization) => ({
+              kind: "organization-updated" as const,
+              sequence,
+              organization,
+            })),
+          ),
         );
 
       const projectUpsertOrRemove = (

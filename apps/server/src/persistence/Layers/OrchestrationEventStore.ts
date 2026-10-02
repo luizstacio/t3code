@@ -38,7 +38,7 @@ const EventMetadataFromJsonString = Schema.fromJsonString(OrchestrationEventMeta
 const AppendEventRequestSchema = Schema.Struct({
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  streamId: Schema.Union([ProjectId, ThreadId]),
+  streamId: Schema.Union([Schema.Literal("organization"), ProjectId, ThreadId]),
   type: OrchestrationEventType,
   causationEventId: Schema.NullOr(EventId),
   correlationId: Schema.NullOr(CommandId),
@@ -54,7 +54,7 @@ const OrchestrationEventPersistedRowSchema = Schema.Struct({
   eventId: EventId,
   type: OrchestrationEventType,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([Schema.Literal("organization"), ProjectId, ThreadId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -239,7 +239,7 @@ const makeEventStore = Effect.gen(function* () {
           COUNT(*) AS "eventCount",
           COALESCE(SUM(octet_length(payload_json)), 0) AS "payloadBytes",
           COALESCE(MAX(event_type IN (
-            'thread.created', 'project.created'
+            'organization.workspace-created', 'thread.created', 'project.created'
           )), 0) AS "hasCreateEvent"
         FROM (
           SELECT payload_json, event_type

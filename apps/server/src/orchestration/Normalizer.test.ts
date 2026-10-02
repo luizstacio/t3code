@@ -3,6 +3,7 @@ import {
   CommandId,
   type ClientOrchestrationCommand,
   MessageId,
+  OrganizationWorkspaceId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -69,5 +70,20 @@ describe("canonicalizeClientCommandTimestamps", () => {
     }
     expect(result.createdAt).toBe(serverReceivedAt);
     expect(result.bootstrap?.createThread?.createdAt).toBe(serverReceivedAt);
+  });
+
+  it("replaces organization mutation timestamps", () => {
+    const command: ClientOrchestrationCommand = {
+      type: "organization.workspace.update",
+      commandId: CommandId.make("command-3"),
+      workspaceId: OrganizationWorkspaceId.make("workspace-1"),
+      name: "Team",
+      updatedAt: clientCreatedAt,
+    };
+
+    expect(canonicalizeClientCommandTimestamps(command, serverReceivedAt)).toEqual({
+      ...command,
+      updatedAt: serverReceivedAt,
+    });
   });
 });

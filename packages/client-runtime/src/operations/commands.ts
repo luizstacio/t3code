@@ -29,6 +29,14 @@ type CommandInput<T extends CommandType> = Omit<
     : {});
 
 export type CreateProjectInput = CommandInput<"project.create">;
+export type CreateOrganizationWorkspaceInput = CommandInput<"organization.workspace.create">;
+export type UpdateOrganizationWorkspaceInput = CommandInput<"organization.workspace.update">;
+export type DeleteOrganizationWorkspaceInput = CommandInput<"organization.workspace.delete">;
+export type CreateOrganizationFolderInput = CommandInput<"organization.folder.create">;
+export type UpdateOrganizationFolderInput = CommandInput<"organization.folder.update">;
+export type DeleteOrganizationFolderInput = CommandInput<"organization.folder.delete">;
+export type UpsertOrganizationMembershipInput = CommandInput<"organization.membership.upsert">;
+export type DeleteOrganizationMembershipInput = CommandInput<"organization.membership.delete">;
 export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
 export type CreateThreadInput = CommandInput<"thread.create">;
@@ -92,6 +100,97 @@ function timestampedCommandMetadata(input: {
 function dispatch(command: ClientOrchestrationCommand) {
   return request(ORCHESTRATION_WS_METHODS.dispatchCommand, command);
 }
+
+export const createOrganizationWorkspace: (
+  input: CreateOrganizationWorkspaceInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.createOrganizationWorkspace")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "organization.workspace.create",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const updateOrganizationWorkspace: (
+  input: UpdateOrganizationWorkspaceInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.updateOrganizationWorkspace")(
+  function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "organization.workspace.update",
+      commandId: yield* commandId(input),
+    });
+  },
+);
+
+export const deleteOrganizationWorkspace: (
+  input: DeleteOrganizationWorkspaceInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.deleteOrganizationWorkspace")(
+  function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "organization.workspace.delete",
+      commandId: yield* commandId(input),
+    });
+  },
+);
+
+export const createOrganizationFolder: (input: CreateOrganizationFolderInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.createOrganizationFolder")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "organization.folder.create",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const updateOrganizationFolder: (input: UpdateOrganizationFolderInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.updateOrganizationFolder")(function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "organization.folder.update",
+      commandId: yield* commandId(input),
+    });
+  });
+
+export const deleteOrganizationFolder: (input: DeleteOrganizationFolderInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.deleteOrganizationFolder")(function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "organization.folder.delete",
+      commandId: yield* commandId(input),
+    });
+  });
+
+export const upsertOrganizationMembership: (
+  input: UpsertOrganizationMembershipInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.upsertOrganizationMembership")(
+  function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "organization.membership.upsert",
+      commandId: yield* commandId(input),
+    });
+  },
+);
+
+export const deleteOrganizationMembership: (
+  input: DeleteOrganizationMembershipInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.deleteOrganizationMembership")(
+  function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "organization.membership.delete",
+      commandId: yield* commandId(input),
+    });
+  },
+);
 
 export const createProject: (input: CreateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createProject",

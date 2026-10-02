@@ -62,10 +62,22 @@ interface CommandEnvelope {
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
-  readonly aggregateKind: "project" | "thread";
-  readonly aggregateId: ProjectId | ThreadId;
+  readonly aggregateKind: "organization" | "project" | "thread";
+  readonly aggregateId: "organization" | ProjectId | ThreadId;
 } {
   switch (command.type) {
+    case "organization.workspace.create":
+    case "organization.workspace.update":
+    case "organization.workspace.delete":
+    case "organization.folder.create":
+    case "organization.folder.update":
+    case "organization.folder.delete":
+    case "organization.membership.upsert":
+    case "organization.membership.delete":
+      return {
+        aggregateKind: "organization",
+        aggregateId: "organization",
+      };
     case "project.create":
     case "project.meta.update":
     case "project.delete":

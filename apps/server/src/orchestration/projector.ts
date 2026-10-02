@@ -1,4 +1,5 @@
 import type {
+  OrganizationState,
   OrchestrationEvent,
   OrchestrationProject,
   OrchestrationReadModel,
@@ -8,6 +9,7 @@ import type {
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import {
+  EMPTY_ORGANIZATION_STATE,
   isImportedAgentSessionMessageId,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
@@ -59,6 +61,94 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+
+export function projectOrganizationEvent(
+  state: OrganizationState,
+  event: OrchestrationEvent,
+): OrganizationState {
+  switch (event.type) {
+    case "organization.workspace-created":
+      return {
+        ...state,
+        workspaces: [...state.workspaces, event.payload.workspace],
+      };
+    case "organization.workspace-updated":
+      return {
+        ...state,
+        workspaces: state.workspaces.map((workspace) =>
+          workspace.id === event.payload.workspaceId
+            ? {
+                ...workspace,
+                ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
+                ...(event.payload.orderKey !== undefined
+                  ? { orderKey: event.payload.orderKey }
+                  : {}),
+                updatedAt: event.payload.updatedAt,
+              }
+            : workspace,
+        ),
+      };
+    case "organization.workspace-deleted": {
+      const folderIds = new Set(
+        state.folders
+          .filter(({ workspaceId }) => workspaceId === event.payload.workspaceId)
+          .map(({ id }) => id),
+      );
+      return {
+        workspaces: state.workspaces.filter(({ id }) => id !== event.payload.workspaceId),
+        folders: state.folders.filter(({ id }) => !folderIds.has(id)),
+        memberships: state.memberships.filter(({ folderId }) => !folderIds.has(folderId)),
+      };
+    }
+    case "organization.folder-created":
+      return { ...state, folders: [...state.folders, event.payload.folder] };
+    case "organization.folder-updated":
+      return {
+        ...state,
+        folders: state.folders.map((folder) =>
+          folder.id === event.payload.folderId
+            ? {
+                ...folder,
+                ...(event.payload.workspaceId !== undefined
+                  ? { workspaceId: event.payload.workspaceId }
+                  : {}),
+                ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
+                ...(event.payload.orderKey !== undefined
+                  ? { orderKey: event.payload.orderKey }
+                  : {}),
+                updatedAt: event.payload.updatedAt,
+              }
+            : folder,
+        ),
+      };
+    case "organization.folder-deleted":
+      return {
+        ...state,
+        folders: state.folders.filter(({ id }) => id !== event.payload.folderId),
+        memberships: state.memberships.filter(
+          ({ folderId }) => folderId !== event.payload.folderId,
+        ),
+      };
+    case "organization.membership-upserted": {
+      const exists = state.memberships.some(({ id }) => id === event.payload.membership.id);
+      return {
+        ...state,
+        memberships: exists
+          ? state.memberships.map((membership) =>
+              membership.id === event.payload.membership.id ? event.payload.membership : membership,
+            )
+          : [...state.memberships, event.payload.membership],
+      };
+    }
+    case "organization.membership-deleted":
+      return {
+        ...state,
+        memberships: state.memberships.filter(({ id }) => id !== event.payload.membershipId),
+      };
+    default:
+      return state;
+  }
+}
 
 // Async questions can stay open while the agent produces more activity.
 // Match the database snapshot's pending-question retention.
@@ -332,6 +422,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     snapshotSequence: 0,
     projects: [],
     threads: [],
+    organization: EMPTY_ORGANIZATION_STATE,
     updatedAt: nowIso,
   };
 }
@@ -347,6 +438,22 @@ export function projectEvent(
   };
 
   switch (event.type) {
+    case "organization.workspace-created":
+    case "organization.workspace-updated":
+    case "organization.workspace-deleted":
+    case "organization.folder-created":
+    case "organization.folder-updated":
+    case "organization.folder-deleted":
+    case "organization.membership-upserted":
+    case "organization.membership-deleted":
+      return Effect.succeed({
+        ...nextBase,
+        organization: projectOrganizationEvent(
+          nextBase.organization ?? EMPTY_ORGANIZATION_STATE,
+          event,
+        ),
+      });
+
     case "project.created":
       return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {

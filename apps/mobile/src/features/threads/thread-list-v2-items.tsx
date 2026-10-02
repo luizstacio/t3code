@@ -16,7 +16,7 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
-import type { EnvironmentMachineKind } from "@t3tools/contracts";
+import { OrganizationFolderId, type EnvironmentMachineKind } from "@t3tools/contracts";
 import { canSnooze, resolveSnoozePresets } from "@t3tools/client-runtime/state/thread-settled";
 import type { MenuAction } from "@react-native-menu/menu";
 import { memo, useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
@@ -496,6 +496,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly onPinThread: (thread: EnvironmentThreadShell) => void;
   readonly onUnpinThread: (thread: EnvironmentThreadShell) => void;
   readonly onSetThreadAutoSettle: (thread: EnvironmentThreadShell, enabled: boolean) => void;
+  readonly organizationFolders?: ReadonlyArray<{
+    readonly id: OrganizationFolderId;
+    readonly name: string;
+    readonly selected: boolean;
+  }>;
+  readonly onMoveToOrganizationFolder?: (
+    thread: EnvironmentThreadShell,
+    folderId: OrganizationFolderId,
+  ) => void;
   /** False on environments whose server predates thread.settle/unsettle:
       swipe + menu fall back to Archive instead of failing on use. */
   readonly settlementSupported: boolean;
@@ -543,6 +552,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     onUnpinThread,
     onSetThreadAutoSettle,
     onMoveThread,
+    onMoveToOrganizationFolder,
   } = props;
   const snoozedRow = props.snoozed === true;
   const pinnedRow = props.pinned === true;
@@ -709,6 +719,24 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ],
     [props.titleRegenerationSupported, thread.titleRegeneration],
   );
+  const organizationMenuItems = useMemo<MenuAction[]>(
+    () =>
+      props.organizationFolders?.length && onMoveToOrganizationFolder
+        ? [
+            {
+              id: "organization-folder",
+              title: "Move to folder",
+              image: "folder",
+              subactions: props.organizationFolders.map((folder) => ({
+                id: `organization-folder:${folder.id}`,
+                title: folder.name,
+                state: folder.selected ? "on" : "off",
+              })),
+            },
+          ]
+        : [],
+    [onMoveToOrganizationFolder, props.organizationFolders],
+  );
   const snoozableCardMenuActions = useMemo<MenuAction[]>(
     () => [
       { id: "settle", title: "Settle", image: "checkmark" },
@@ -721,9 +749,16 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ...arrangementMenuItems,
       ...titleMenuItems,
       ...autoSettleMenuItems,
+      ...organizationMenuItems,
       { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
     ],
-    [arrangementMenuItems, autoSettleMenuItems, snoozePresetActions, titleMenuItems],
+    [
+      arrangementMenuItems,
+      autoSettleMenuItems,
+      organizationMenuItems,
+      snoozePresetActions,
+      titleMenuItems,
+    ],
   );
   const cardMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -731,9 +766,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ...arrangementMenuItems,
       ...titleMenuItems,
       ...autoSettleMenuItems,
+      ...organizationMenuItems,
       ...CARD_MENU_ACTIONS.slice(1),
     ],
-    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems],
+    [arrangementMenuItems, autoSettleMenuItems, organizationMenuItems, titleMenuItems],
   );
   // Settled and snoozed rows keep the setting too, matching web where every
   // row shares one menu builder.
@@ -745,27 +781,30 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ),
       ...titleMenuItems,
       ...autoSettleMenuItems,
+      ...organizationMenuItems,
       SLIM_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems],
+    [arrangementMenuItems, autoSettleMenuItems, organizationMenuItems, titleMenuItems],
   );
   const snoozedMenuActions = useMemo<MenuAction[]>(
     () => [
       SNOOZED_MENU_ACTIONS[0]!,
       ...titleMenuItems,
       ...autoSettleMenuItems,
+      ...organizationMenuItems,
       SNOOZED_MENU_ACTIONS[1]!,
     ],
-    [autoSettleMenuItems, titleMenuItems],
+    [autoSettleMenuItems, organizationMenuItems, titleMenuItems],
   );
   const legacyMenuActions = useMemo<MenuAction[]>(
     () => [
       LEGACY_MENU_ACTIONS[0]!,
       ...arrangementMenuItems,
       ...titleMenuItems,
+      ...organizationMenuItems,
       LEGACY_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, titleMenuItems],
+    [arrangementMenuItems, organizationMenuItems, titleMenuItems],
   );
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -783,6 +822,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "archive") handleArchive();
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
+      if (nativeEvent.event.startsWith("organization-folder:")) {
+        onMoveToOrganizationFolder?.(
+          thread,
+          OrganizationFolderId.make(nativeEvent.event.slice("organization-folder:".length)),
+        );
+      }
       if (nativeEvent.event === "copy-thread-id") {
         copyTextWithHaptic(thread.id, { target: "thread-id" });
       }
@@ -804,6 +849,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     },
     [
       onNewThreadOnBranch,
+      onMoveToOrganizationFolder,
       thread,
       handleArchive,
       handleDelete,

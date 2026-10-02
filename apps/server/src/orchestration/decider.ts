@@ -1,4 +1,5 @@
 import {
+  EMPTY_ORGANIZATION_STATE,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
@@ -221,7 +222,198 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   OrchestrationCommandRejection | PlatformError.PlatformError,
   Crypto.Crypto
 > {
+  const organization = readModel.organization ?? EMPTY_ORGANIZATION_STATE;
+  const rejectOrganizationCommand = (detail: string) =>
+    new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+
   switch (command.type) {
+    case "organization.workspace.create": {
+      if (organization.workspaces.some(({ id }) => id === command.workspaceId)) {
+        return yield* rejectOrganizationCommand(
+          `Workspace '${command.workspaceId}' already exists.`,
+        );
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "organization",
+          aggregateId: "organization",
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "organization.workspace-created",
+        payload: {
+          workspace: {
+            id: command.workspaceId,
+            name: command.name,
+            orderKey: command.orderKey,
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "organization.workspace.update": {
+      if (!organization.workspaces.some(({ id }) => id === command.workspaceId)) {
+        return yield* rejectOrganizationCommand(
+          `Workspace '${command.workspaceId}' does not exist.`,
+        );
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "organization",
+          aggregateId: "organization",
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "organization.workspace-updated",
+        payload: {
+          workspaceId: command.workspaceId,
+          ...(command.name !== undefined ? { name: command.name } : {}),
+          ...(command.orderKey !== undefined ? { orderKey: command.orderKey } : {}),
+          updatedAt: command.updatedAt,
+        },
+      };
+    }
+
+    case "organization.workspace.delete": {
+      if (!organization.workspaces.some(({ id }) => id === command.workspaceId)) {
+        return yield* rejectOrganizationCommand(
+          `Workspace '${command.workspaceId}' does not exist.`,
+        );
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "organization",
+          aggregateId: "organization",
+          occurredAt: command.deletedAt,
+          commandId: command.commandId,
+        })),
+        type: "organization.workspace-deleted",
+        payload: { workspaceId: command.workspaceId, deletedAt: command.deletedAt },
+      };
+    }
+
+    case "organization.folder.create": {
+      if (!organization.workspaces.some(({ id }) => id === command.workspaceId)) {
+        return yield* rejectOrganizationCommand(
+          `Workspace '${command.workspaceId}' does not exist.`,
+        );
+      }
+      if (organization.folders.some(({ id }) => id === command.folderId)) {
+        return yield* rejectOrganizationCommand(`Folder '${command.folderId}' already exists.`);
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "organization",
+          aggregateId: "organization",
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "organization.folder-created",
+        payload: {
+          folder: {
+            id: command.folderId,
+            workspaceId: command.workspaceId,
+            name: command.name,
+            orderKey: command.orderKey,
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "organization.folder.update": {
+      if (!organization.folders.some(({ id }) => id === command.folderId)) {
+        return yield* rejectOrganizationCommand(`Folder '${command.folderId}' does not exist.`);
+      }
+      if (
+        command.workspaceId !== undefined &&
+        !organization.workspaces.some(({ id }) => id === command.workspaceId)
+      ) {
+        return yield* rejectOrganizationCommand(
+          `Workspace '${command.workspaceId}' does not exist.`,
+        );
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "organization",
+          aggregateId: "organization",
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "organization.folder-updated",
+        payload: {
+          folderId: command.folderId,
+          ...(command.workspaceId !== undefined ? { workspaceId: command.workspaceId } : {}),
+          ...(command.name !== undefined ? { name: command.name } : {}),
+          ...(command.orderKey !== undefined ? { orderKey: command.orderKey } : {}),
+          updatedAt: command.updatedAt,
+        },
+      };
+    }
+
+    case "organization.folder.delete": {
+      if (!organization.folders.some(({ id }) => id === command.folderId)) {
+        return yield* rejectOrganizationCommand(`Folder '${command.folderId}' does not exist.`);
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "organization",
+          aggregateId: "organization",
+          occurredAt: command.deletedAt,
+          commandId: command.commandId,
+        })),
+        type: "organization.folder-deleted",
+        payload: { folderId: command.folderId, deletedAt: command.deletedAt },
+      };
+    }
+
+    case "organization.membership.upsert": {
+      if (!organization.folders.some(({ id }) => id === command.folderId)) {
+        return yield* rejectOrganizationCommand(`Folder '${command.folderId}' does not exist.`);
+      }
+      const existing = organization.memberships.find(({ id }) => id === command.membershipId);
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "organization",
+          aggregateId: "organization",
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "organization.membership-upserted",
+        payload: {
+          membership: {
+            id: command.membershipId,
+            folderId: command.folderId,
+            item: command.item,
+            orderKey: command.orderKey,
+            createdAt: existing?.createdAt ?? command.updatedAt,
+            updatedAt: command.updatedAt,
+          },
+        },
+      };
+    }
+
+    case "organization.membership.delete": {
+      if (!organization.memberships.some(({ id }) => id === command.membershipId)) {
+        return yield* rejectOrganizationCommand(
+          `Membership '${command.membershipId}' does not exist.`,
+        );
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "organization",
+          aggregateId: "organization",
+          occurredAt: command.deletedAt,
+          commandId: command.commandId,
+        })),
+        type: "organization.membership-deleted",
+        payload: { membershipId: command.membershipId, deletedAt: command.deletedAt },
+      };
+    }
+
     case "project.create": {
       yield* requireProjectAbsent({
         readModel,

@@ -1,5 +1,7 @@
 import {
   ApprovalRequestId,
+  EMPTY_ORGANIZATION_STATE,
+  OrganizationState,
   isImportedAgentSessionMessageId,
   UserInputAttachmentAnswerPayload,
   type ChatAttachment,
@@ -21,7 +23,11 @@ import {
   threadPullRequestKeysEqual,
 } from "@t3tools/shared/threadPullRequests";
 
-import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import {
+  toPersistenceDecodeError,
+  toPersistenceSqlError,
+  type ProjectionRepositoryError,
+} from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
@@ -63,8 +69,10 @@ import {
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
+import { projectOrganizationEvent } from "../projector.ts";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
+  organization: "projection.organization",
   projects: "projection.projects",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
@@ -495,6 +503,52 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const serverConfig = yield* ServerConfig;
+
+    const OrganizationStateJson = Schema.fromJsonString(OrganizationState);
+    const decodeOrganizationState = Schema.decodeUnknownEffect(OrganizationStateJson);
+    const encodeOrganizationState = Schema.encodeEffect(OrganizationStateJson);
+    const readOrganizationState = sql<{ readonly stateJson: string }>`
+      SELECT state_json AS "stateJson"
+      FROM projection_organization
+      WHERE singleton = 1
+    `.pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionPipeline.readOrganizationState:query")),
+      Effect.flatMap((rows) => {
+        const row = rows[0];
+        return row
+          ? decodeOrganizationState(row.stateJson).pipe(
+              Effect.mapError(
+                toPersistenceDecodeError("ProjectionPipeline.readOrganizationState:decode"),
+              ),
+            )
+          : Effect.succeed(EMPTY_ORGANIZATION_STATE);
+      }),
+    );
+
+    const applyOrganizationProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyOrganizationProjection",
+    )(function* (event, _attachmentSideEffects) {
+      if (event.aggregateKind !== "organization") return;
+      const state = projectOrganizationEvent(yield* readOrganizationState, event);
+      const stateJson = yield* encodeOrganizationState(state).pipe(
+        Effect.mapError(
+          toPersistenceDecodeError("ProjectionPipeline.applyOrganizationProjection:encode"),
+        ),
+      );
+      // ponytail: one JSON row keeps this projection tiny; split into tables if org size becomes measurable.
+      yield* sql`
+        INSERT INTO projection_organization (singleton, state_json, updated_at)
+        VALUES (1, ${stateJson}, ${event.occurredAt})
+        ON CONFLICT (singleton)
+        DO UPDATE SET
+          state_json = excluded.state_json,
+          updated_at = excluded.updated_at
+      `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionPipeline.applyOrganizationProjection:query"),
+        ),
+      );
+    });
 
     const applyProjectsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyProjectsProjection",
@@ -1951,6 +2005,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     });
 
     const projectors: ReadonlyArray<ProjectorDefinition> = [
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.organization,
+        apply: applyOrganizationProjection,
+      },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
         apply: applyProjectsProjection,

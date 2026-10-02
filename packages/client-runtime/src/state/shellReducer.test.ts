@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  OrganizationWorkspaceId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@t3tools/contracts";
 
 import { applyShellStreamEvent } from "./shellReducer.ts";
@@ -176,6 +181,29 @@ describe("applyShellStreamEvent", () => {
       expect(next.threads).toHaveLength(0);
       expect(next.snapshotSequence).toBe(6);
     });
+  });
+
+  it("replaces organization state", () => {
+    const next = applyShellStreamEvent(baseSnapshot, {
+      kind: "organization-updated",
+      sequence: 7,
+      organization: {
+        workspaces: [
+          {
+            id: OrganizationWorkspaceId.make("workspace-1"),
+            name: "Team",
+            orderKey: "m",
+            createdAt: "2026-04-01T00:00:00.000Z",
+            updatedAt: "2026-04-01T00:00:00.000Z",
+          },
+        ],
+        folders: [],
+        memberships: [],
+      },
+    });
+
+    expect(next.organization?.workspaces[0]?.name).toBe("Team");
+    expect(next.snapshotSequence).toBe(7);
   });
 
   it("returns original snapshot for unrecognized event kinds", () => {

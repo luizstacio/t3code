@@ -48,7 +48,11 @@ export function HardwareKeyboardCommandProvider({
 }: PropsWithChildren<{ readonly pathname: string }>) {
   const navigation = useNavigation();
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
+  const closePalette = useCallback(() => {
+    setPaletteOpen(false);
+    setWorkspacePickerOpen(false);
+  }, []);
   const activeThreadRef = useMemo(() => parseActiveThreadPath(pathname), [pathname]);
   const activeThread = useThreadShell(activeThreadRef);
   const copyTarget = useMemo(
@@ -100,6 +104,7 @@ export function HardwareKeyboardCommandProvider({
     const commands = new Set<HardwareKeyboardCommand>(getRegisteredHardwareKeyboardCommands());
     commands.add("newTask");
     commands.add("commandPalette");
+    commands.add("organizationWorkspace.picker");
     if (pathname !== "/" && !pathname.startsWith("/threads/")) {
       for (const command of commands) {
         if (command.startsWith("thread.jump.")) commands.delete(command);
@@ -118,6 +123,12 @@ export function HardwareKeyboardCommandProvider({
   const onCommand = useCallback(
     (command: HardwareKeyboardCommand) => {
       if (command === "commandPalette") {
+        setWorkspacePickerOpen(false);
+        setPaletteOpen(true);
+        return;
+      }
+      if (command === "organizationWorkspace.picker") {
+        setWorkspacePickerOpen(true);
         setPaletteOpen(true);
         return;
       }
@@ -178,9 +189,14 @@ export function HardwareKeyboardCommandProvider({
   const palette = useMemo(
     () =>
       paletteOpen ? (
-        <CommandPalette pathname={pathname} onClose={closePalette} onCommand={onCommand} />
+        <CommandPalette
+          pathname={pathname}
+          initialQuery={workspacePickerOpen ? "workspace" : ""}
+          onClose={closePalette}
+          onCommand={onCommand}
+        />
       ) : null,
-    [closePalette, onCommand, paletteOpen, pathname],
+    [closePalette, onCommand, paletteOpen, pathname, workspacePickerOpen],
   );
 
   return (

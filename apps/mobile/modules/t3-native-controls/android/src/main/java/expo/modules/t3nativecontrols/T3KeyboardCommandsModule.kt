@@ -29,6 +29,31 @@ class T3KeyboardCommandsView(
   var enabledCommands = emptySet<String>()
 
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (
+      event.action == KeyEvent.ACTION_DOWN &&
+      event.repeatCount == 0 &&
+      event.isCtrlPressed &&
+      event.isAltPressed &&
+      !event.isShiftPressed
+    ) {
+      val command = when (event.keyCode) {
+        KeyEvent.KEYCODE_LEFT_BRACKET -> "organizationWorkspace.previous"
+        KeyEvent.KEYCODE_RIGHT_BRACKET -> "organizationWorkspace.next"
+        KeyEvent.KEYCODE_W -> "organizationWorkspace.picker"
+        else -> null
+      }
+      if (command != null && enabledCommands.contains(command)) {
+        onCommand(mapOf("command" to command))
+        return true
+      }
+      if (event.keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
+        val command = "organizationWorkspace.jump.${event.keyCode - KeyEvent.KEYCODE_1 + 1}"
+        if (enabledCommands.contains(command)) {
+          onCommand(mapOf("command" to command))
+          return true
+        }
+      }
+    }
     val copiesThreadReference =
       event.action == KeyEvent.ACTION_DOWN &&
         event.repeatCount == 0 &&
