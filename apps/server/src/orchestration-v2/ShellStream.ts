@@ -7,6 +7,7 @@ import type {
   OrchestrationV2ThreadShellSnapshot,
   OrchestrationV2ShellStreamItem,
   OrchestrationV2StoredEvent,
+  OrganizationState,
 } from "@t3tools/contracts";
 import { OrchestrationProjectShell as ProjectShellSchema } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -17,17 +18,23 @@ export function buildActiveShellSnapshot(input: {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
   readonly threads: OrchestrationV2ThreadShellSnapshot;
   readonly snapshotSequence: number;
+  readonly organization?: OrganizationState;
 }): OrchestrationV2ShellSnapshot {
   return {
     schemaVersion: input.threads.schemaVersion,
     snapshotSequence: input.snapshotSequence,
     projects: input.projects,
+    ...(input.organization === undefined ? {} : { organization: input.organization }),
     threads: input.threads.threads,
     archivedThreads: [],
   };
 }
 
 export type ShellApplicationEvent =
+  | Pick<
+      Extract<ApplicationStoredEvent, { readonly aggregateKind: "organization" }>,
+      "aggregateKind" | "aggregateId" | "type" | "sequence"
+    >
   | Pick<
       Extract<ApplicationStoredEvent, { readonly aggregateKind: "project" }>,
       "aggregateKind" | "aggregateId" | "type" | "sequence"
@@ -39,14 +46,23 @@ export type ShellApplicationEvent =
 
 /** Shell updates refetch an aggregate; drop transcript bodies before retaining an event. */
 export function toShellApplicationEvent(stored: ApplicationStoredEvent): ShellApplicationEvent {
-  return "aggregateKind" in stored
-    ? {
+  if ("aggregateKind" in stored) {
+    if (stored.aggregateKind === "organization") {
+      return {
         aggregateKind: stored.aggregateKind,
         aggregateId: stored.aggregateId,
         type: stored.type,
         sequence: stored.sequence,
-      }
-    : { sequence: stored.sequence, event: { threadId: stored.event.threadId } };
+      };
+    }
+    return {
+      aggregateKind: stored.aggregateKind,
+      aggregateId: stored.aggregateId,
+      type: stored.type,
+      sequence: stored.sequence,
+    };
+  }
+  return { sequence: stored.sequence, event: { threadId: stored.event.threadId } };
 }
 
 /** Keep only the newest shell-relevant event per project/thread aggregate. */
@@ -57,7 +73,7 @@ export function coalesceShellApplicationEvents<A extends ShellApplicationEvent>(
   for (const stored of events) {
     const key =
       "aggregateKind" in stored
-        ? `project:${stored.aggregateId}`
+        ? `${stored.aggregateKind}:${stored.aggregateId}`
         : `thread:${stored.event.threadId}`;
     latestByAggregate.set(key, stored);
   }

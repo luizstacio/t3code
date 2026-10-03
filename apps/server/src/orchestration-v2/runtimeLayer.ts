@@ -30,6 +30,8 @@ import { layer as orchestratorLayer } from "./Orchestrator.ts";
 import { layer as projectionStoreLayer } from "./ProjectionStore.ts";
 import { layer as projectionMaintenanceLayer } from "./ProjectionMaintenance.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as OrganizationStore from "./OrganizationStore.ts";
+import * as OrganizationService from "./OrganizationService.ts";
 import { layerFromProviderInstanceRegistry as providerAdapterRegistryLayerFromProviderInstances } from "./ProviderAdapterRegistry.ts";
 import { layer as providerContinuationRequestsLayer } from "./ProviderContinuationRequests.ts";
 import { workerLive as providerContinuationWorkerLive } from "./ProviderContinuationService.ts";
@@ -94,6 +96,17 @@ export const ProjectServiceLayerLive = projectServiceLayer.pipe(
       eventSinkProvided,
       idAllocatorLayer,
       legacyV1ThreadImporterProvided,
+    ),
+  ),
+);
+
+const organizationStoreLayer = OrganizationStore.layer;
+export const OrganizationServiceLayerLive = OrganizationService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      organizationStoreLayer,
+      OrchestrationEventInfrastructureLayerLive,
+      idAllocatorLayer,
     ),
   ),
 );
@@ -310,6 +323,8 @@ export const OrchestrationV2LayerLive = Layer.mergeAll(
 export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   OrchestrationV2LayerLive.pipe(Layer.provide(ProjectServiceLayerLive)),
   ProjectServiceLayerLive,
+  organizationStoreLayer,
+  OrganizationServiceLayerLive,
   managedProjectFoldersProvided,
   threadLaunchProvided,
   threadLifecycleProvided,

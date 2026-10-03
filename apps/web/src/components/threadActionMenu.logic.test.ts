@@ -71,6 +71,20 @@ describe("buildThreadActionMenuItems", () => {
     ).toMatchObject({ label: "Filter by Beta Project", icon: "folder-tree" });
   });
 
+  it("offers organization folders with the current assignment checked", () => {
+    const move = buildThreadActionMenuItems({
+      ...baseState,
+      organizationFolders: [
+        { id: "active", label: "Active", checked: true },
+        { id: "later", label: "Later", checked: false },
+      ],
+    }).find((item) => item.id === "organization-folder");
+    expect(move?.children).toEqual([
+      { id: "organization-folder:active", label: "Active", checked: true },
+      { id: "organization-folder:later", label: "Later", checked: false },
+    ]);
+  });
+
   it("offers the way back to all projects once the list is scoped", () => {
     const items = buildThreadActionMenuItems({
       ...baseState,

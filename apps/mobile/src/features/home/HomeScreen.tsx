@@ -6,11 +6,16 @@ import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import type { OrganizationFolderView } from "@t3tools/client-runtime/state/organization";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
 } from "@t3tools/client-runtime/state/thread-search";
-import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type OrganizationFolderId,
+  type SidebarProjectGroupingMode,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -72,6 +77,7 @@ interface HomeScreenProps {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
+  readonly organizationFolders: ReadonlyArray<OrganizationFolderView>;
   readonly catalogState: WorkspaceState;
   readonly savedConnectionsById: Readonly<Record<string, SavedRemoteConnection>>;
   readonly environments: ReadonlyArray<
@@ -109,6 +115,10 @@ interface HomeScreenProps {
     thread: EnvironmentThreadShell,
     direction: ThreadMoveDestination,
   ) => Promise<boolean>;
+  readonly onMoveThreadToOrganizationFolder: (
+    thread: EnvironmentThreadShell,
+    folderId: OrganizationFolderId,
+  ) => void;
   readonly onRenameThread: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void;
@@ -741,6 +751,17 @@ export function HomeScreen(props: HomeScreenProps) {
           onUnpinThread={handleUnpinThread}
           onSetThreadAutoSettle={handleSetThreadAutoSettle}
           onMoveThread={handleMoveThread}
+          organizationFolders={props.organizationFolders.map(({ folder, memberships }) => ({
+            id: folder.id,
+            name: folder.name,
+            selected: memberships.some(
+              (membership) =>
+                membership.item.kind === "thread" &&
+                membership.item.environmentId === thread.environmentId &&
+                membership.item.threadId === thread.id,
+            ),
+          }))}
+          onMoveToOrganizationFolder={props.onMoveThreadToOrganizationFolder}
           onSwipeableClose={handleSwipeableClose}
           onSwipeableWillOpen={handleSwipeableWillOpen}
           activationKey={item.key}
@@ -773,6 +794,8 @@ export function HomeScreen(props: HomeScreenProps) {
       props.onSelectPendingTask,
       props.onSelectThread,
       props.onNewThreadOnBranch,
+      props.onMoveThreadToOrganizationFolder,
+      props.organizationFolders,
       props.savedConnectionsById,
       resolveProviderInstance,
       providersByEnvironmentId,

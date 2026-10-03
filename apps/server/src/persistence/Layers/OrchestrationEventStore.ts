@@ -1,5 +1,6 @@
 import {
   ApplicationEventMetadata,
+  ApplicationOrganizationEvent,
   ApplicationProjectEvent,
   type ApplicationStoredEvent,
   CommandId,
@@ -33,6 +34,7 @@ import * as OrchestrationEventStore from "../Services/OrchestrationEventStore.ts
 
 const encodeProjectIcon = Schema.encodeSync(ProjectIconOverride);
 const decodeProjectEvent = Schema.decodeUnknownEffect(ApplicationProjectEvent);
+const decodeOrganizationEvent = Schema.decodeUnknownEffect(ApplicationOrganizationEvent);
 const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown);
 const EventMetadataFromJsonString = Schema.fromJsonString(ApplicationEventMetadata);
 const ProjectEventType = Schema.Literals([
@@ -75,7 +77,7 @@ interface ApplicationEventRow {
   readonly sequence: number;
   readonly event_id: string;
   readonly command_id: string | null;
-  readonly aggregate_kind: "project" | "thread";
+  readonly aggregate_kind: "organization" | "project" | "thread";
   readonly stream_id: string;
   readonly event_type: string;
   readonly occurred_at: string;
@@ -150,9 +152,28 @@ const rowToProjectEvent = Effect.fn("OrchestrationEventStore.rowToProjectEvent")
   });
 });
 
+const rowToOrganizationEvent = Effect.fn("OrchestrationEventStore.rowToOrganizationEvent")(
+  function* (row: ApplicationEventRow) {
+    return yield* decodeOrganizationEvent({
+      sequence: row.sequence,
+      eventId: row.event_id,
+      type: row.event_type,
+      aggregateKind: row.aggregate_kind,
+      aggregateId: row.stream_id,
+      occurredAt: row.occurred_at,
+      commandId: row.command_id,
+      causationEventId: row.causation_event_id,
+      correlationId: row.correlation_id,
+      payload: yield* decodeJson(row.payload_json),
+      metadata: yield* decodeJson(row.metadata_json),
+    });
+  },
+);
+
 function rowToApplicationStoredEvent(
   row: ApplicationEventRow,
 ): Effect.Effect<ApplicationStoredEvent, Schema.SchemaError> {
+  if (row.aggregate_kind === "organization") return rowToOrganizationEvent(row);
   return row.aggregate_kind === "project" ? rowToProjectEvent(row) : rowToV2StoredEvent(row);
 }
 
@@ -275,6 +296,35 @@ const makeEventStore = Effect.gen(function* () {
         ),
       );
 
+  const appendOrganizationEvent: OrchestrationEventStore.OrchestrationEventStoreShape["appendOrganizationEvent"] =
+    (event) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly sequence: number }>`
+          INSERT INTO orchestration_events (
+            event_id, aggregate_kind, stream_id, stream_version, event_type,
+            occurred_at, command_id, causation_event_id, correlation_id,
+            actor_kind, payload_json, metadata_json, application_event_version
+          ) VALUES (
+            ${event.eventId}, 'organization', 'organization',
+            COALESCE((
+              SELECT MAX(stream_version) + 1 FROM orchestration_events
+              WHERE aggregate_kind = 'organization' AND stream_id = 'organization'
+            ), 0),
+            ${event.type}, ${event.occurredAt}, ${event.commandId},
+            ${event.causationEventId}, ${event.correlationId},
+            'client', ${yield* encodeJson(event.payload)}, ${yield* encodeJson(event.metadata)}, 2
+          ) RETURNING sequence
+        `;
+        return yield* decodeOrganizationEvent({ ...event, sequence: rows[0]?.sequence });
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "OrchestrationEventStore.appendOrganizationEvent:insert",
+            "OrchestrationEventStore.appendOrganizationEvent:decode",
+          ),
+        ),
+      );
+
   const readApplicationRows = (input: {
     readonly afterSequence: number;
     readonly throughSequence?: number;
@@ -302,7 +352,7 @@ const makeEventStore = Effect.gen(function* () {
       ${
         input.onlyAgentEvents === true
           ? sql``
-          : sql`INDEXED BY idx_orchestration_events_application_high_water`
+          : sql`INDEXED BY idx_orchestration_events_application_high_water_v2`
       }
       WHERE sequence > ${input.afterSequence}
         AND sequence <= ${input.throughSequence ?? Number.MAX_SAFE_INTEGER}
@@ -310,7 +360,8 @@ const makeEventStore = Effect.gen(function* () {
           ${
             input.onlyAgentEvents === true
               ? sql`application_event_version = 2 AND aggregate_kind = 'thread'`
-              : sql`aggregate_kind = 'project'
+              : sql`aggregate_kind = 'organization'
+                    OR aggregate_kind = 'project'
                     OR (application_event_version = 2 AND aggregate_kind = 'thread')`
           }
         )
@@ -474,11 +525,12 @@ const makeEventStore = Effect.gen(function* () {
       SELECT
         COUNT(*) AS "eventCount",
         COALESCE(SUM(octet_length(payload_json)), 0) AS "rawPayloadBytes"
-      FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water
+      FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water_v2
       WHERE sequence > ${input.afterSequence}
         AND sequence <= ${input.throughSequence}
         AND (
-          aggregate_kind = 'project'
+          aggregate_kind = 'organization'
+          OR aggregate_kind = 'project'
           OR (application_event_version = 2 AND aggregate_kind = 'thread')
         )
     `.pipe(
@@ -510,8 +562,9 @@ const makeEventStore = Effect.gen(function* () {
   // The OR planner otherwise scans every V2 event instead of seeking the final sequence.
   const latestApplicationSequence = sql<{ readonly sequence: number | null }>`
     SELECT MAX(sequence) AS sequence
-    FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water
-    WHERE aggregate_kind = 'project'
+    FROM orchestration_events INDEXED BY idx_orchestration_events_application_high_water_v2
+    WHERE aggregate_kind = 'organization'
+      OR aggregate_kind = 'project'
       OR (application_event_version = 2 AND aggregate_kind = 'thread')
   `.pipe(
     Effect.map((rows) => rows[0]?.sequence ?? 0),
@@ -592,6 +645,7 @@ const makeEventStore = Effect.gen(function* () {
     (input) => streamProjectedApplicationEvents({ ...input, project: (event) => event });
 
   return {
+    appendOrganizationEvent,
     appendProjectEvent,
     appendAgentEvents,
     readAgentEvents,

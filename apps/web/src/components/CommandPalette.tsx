@@ -17,6 +17,10 @@ import {
 } from "@t3tools/client-runtime/operations/projects";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+import {
+  adjacentOrganizationWorkspaceId,
+  sortOrganizationWorkspaces,
+} from "@t3tools/client-runtime/state/organization";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
 import {
   canPreloadBrowsePath,
@@ -39,6 +43,7 @@ import {
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
+  ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
@@ -126,6 +131,7 @@ import {
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { isEditableFocused } from "../lib/editableFocus";
 import {
   PULL_REQUESTS_PANEL_REF,
   selectActiveRightPanel,
@@ -213,6 +219,7 @@ import {
 import type { Project } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
+import { usePrimaryOrganizationState } from "../state/organization";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -474,6 +481,21 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const organization = usePrimaryOrganizationState();
+  const savedOrganizationWorkspaceId = useUiStateStore(
+    (store) => store.activeOrganizationWorkspaceId,
+  );
+  const setActiveOrganizationWorkspaceId = useUiStateStore(
+    (store) => store.setActiveOrganizationWorkspaceId,
+  );
+  const organizationWorkspaces = useMemo(
+    () => sortOrganizationWorkspaces(organization.workspaces),
+    [organization.workspaces],
+  );
+  const activeOrganizationWorkspaceId =
+    organizationWorkspaces.find(({ id }) => id === savedOrganizationWorkspaceId)?.id ??
+    organizationWorkspaces[0]?.id ??
+    null;
   const { theme, themeHalves, resolvedTheme, appearanceMode, setAppearanceMode } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
   const routeTarget = useParams({
@@ -516,8 +538,43 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           previewFocus: isPreviewFocused(),
           previewOpen,
           modelPickerOpen: composerHandleRef.current?.isModelPickerOpen() ?? false,
+          editableFocus: isEditableFocused(event.target),
         },
       });
+      if (
+        command === "organizationWorkspace.previous" ||
+        command === "organizationWorkspace.next"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        setActiveOrganizationWorkspaceId(
+          adjacentOrganizationWorkspaceId(
+            organizationWorkspaces,
+            activeOrganizationWorkspaceId,
+            command === "organizationWorkspace.next" ? "next" : "previous",
+          ),
+        );
+        return;
+      }
+      const workspaceJumpIndex = ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS.indexOf(
+        command as (typeof ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS)[number],
+      );
+      if (workspaceJumpIndex !== -1) {
+        const workspace = organizationWorkspaces[workspaceJumpIndex];
+        if (workspace) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!event.repeat) setActiveOrganizationWorkspaceId(workspace.id);
+        }
+        return;
+      }
+      if (command === "organizationWorkspace.picker") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) dispatch({ _tag: "OpenSearch", query: "workspace" });
+        return;
+      }
       if (command === "appearance.cycle") {
         event.preventDefault();
         event.stopPropagation();
@@ -571,11 +628,14 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     appearanceMode,
+    activeOrganizationWorkspaceId,
     keybindings,
     navigate,
+    organizationWorkspaces,
     previewOpen,
     resolvedTheme,
     setAppearanceMode,
+    setActiveOrganizationWorkspaceId,
     setOpen,
     terminalOpen,
     theme,
@@ -772,6 +832,21 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const savedOrganizationWorkspaceId = useUiStateStore(
+    (store) => store.activeOrganizationWorkspaceId,
+  );
+  const setActiveOrganizationWorkspaceId = useUiStateStore(
+    (store) => store.setActiveOrganizationWorkspaceId,
+  );
+  const organization = usePrimaryOrganizationState();
+  const organizationWorkspaces = useMemo(
+    () => sortOrganizationWorkspaces(organization.workspaces),
+    [organization.workspaces],
+  );
+  const activeOrganizationWorkspaceId =
+    organizationWorkspaces.find(({ id }) => id === savedOrganizationWorkspaceId)?.id ??
+    organizationWorkspaces[0]?.id ??
+    null;
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const {
@@ -1913,6 +1988,64 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.newWithoutProject",
       run: () => startScratchThread(scratchTargetEnvironmentId),
     });
+  }
+
+  if (organizationWorkspaces.length > 0) {
+    actionItems.push({
+      kind: "submenu",
+      value: "action:switch-organization-workspace",
+      searchTerms: ["switch", "workspace", "organization", "team"],
+      title: "Switch workspace",
+      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+      addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
+      shortcutCommand: "organizationWorkspace.picker",
+      groups: [
+        {
+          value: "organization-workspaces",
+          label: "Workspaces",
+          items: organizationWorkspaces.map((workspace, index) => {
+            const shortcutCommand = ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS[index];
+            return {
+              kind: "action",
+              value: `organization-workspace:${workspace.id}`,
+              title: workspace.name,
+              searchTerms: [workspace.name, "workspace", "organization", "team"],
+              icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+              ...(shortcutCommand ? { shortcutCommand } : {}),
+              titleTrailingContent:
+                workspace.id === activeOrganizationWorkspaceId ? (
+                  <span className="text-xs text-muted-foreground/70">Current</span>
+                ) : undefined,
+              run: async () => {
+                setActiveOrganizationWorkspaceId(workspace.id);
+              },
+            };
+          }),
+        },
+      ],
+    });
+  }
+
+  if (organizationWorkspaces.length > 1) {
+    for (const direction of ["previous", "next"] as const) {
+      actionItems.push({
+        kind: "action",
+        value: `action:${direction}-organization-workspace`,
+        searchTerms: [direction, "workspace", "organization", "team"],
+        title: `${direction === "previous" ? "Previous" : "Next"} workspace`,
+        icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: `organizationWorkspace.${direction}`,
+        run: async () => {
+          setActiveOrganizationWorkspaceId(
+            adjacentOrganizationWorkspaceId(
+              organizationWorkspaces,
+              activeOrganizationWorkspaceId,
+              direction,
+            ),
+          );
+        },
+      });
+    }
   }
 
   if (activeThreadReferenceCopyTarget !== null) {

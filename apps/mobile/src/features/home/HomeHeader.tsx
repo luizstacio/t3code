@@ -98,6 +98,26 @@ export function HomeHeader(props: HomeHeaderProps) {
             title="Thread list options"
             separateBackground
           >
+            <NativeHeaderToolbar.Menu title="Workspace">
+              <NativeHeaderToolbar.Label>Workspace</NativeHeaderToolbar.Label>
+              {props.organizationWorkspaces.map((workspace) => (
+                <NativeHeaderToolbar.MenuAction
+                  key={workspace.id}
+                  isOn={props.selectedOrganizationWorkspaceId === workspace.id}
+                  onPress={() => props.onOrganizationWorkspaceChange(workspace.id)}
+                >
+                  <NativeHeaderToolbar.Label>{workspace.name}</NativeHeaderToolbar.Label>
+                </NativeHeaderToolbar.MenuAction>
+              ))}
+              <NativeHeaderToolbar.MenuAction onPress={props.onCreateOrganizationWorkspace}>
+                <NativeHeaderToolbar.Label>New workspace…</NativeHeaderToolbar.Label>
+              </NativeHeaderToolbar.MenuAction>
+              {props.selectedOrganizationWorkspaceId === null ? null : (
+                <NativeHeaderToolbar.MenuAction onPress={props.onCreateOrganizationFolder}>
+                  <NativeHeaderToolbar.Label>New folder…</NativeHeaderToolbar.Label>
+                </NativeHeaderToolbar.MenuAction>
+              )}
+            </NativeHeaderToolbar.Menu>
             <NativeHeaderToolbar.Menu title="Environment">
               <NativeHeaderToolbar.Label>Environment</NativeHeaderToolbar.Label>
               <NativeHeaderToolbar.MenuAction
@@ -135,6 +155,21 @@ export function HomeHeader(props: HomeHeaderProps) {
                     onPress={() => props.onProjectChange(project.key)}
                   >
                     <NativeHeaderToolbar.Label>{project.label}</NativeHeaderToolbar.Label>
+                  </NativeHeaderToolbar.MenuAction>
+                ))}
+              </NativeHeaderToolbar.Menu>
+            ) : null}
+            {props.selectedProjectKey !== null && props.organizationFolders.length > 0 ? (
+              <NativeHeaderToolbar.Menu title="Move project to folder">
+                <NativeHeaderToolbar.Label>Move project to folder</NativeHeaderToolbar.Label>
+                {props.organizationFolders.map((folder) => (
+                  <NativeHeaderToolbar.MenuAction
+                    key={folder.id}
+                    onPress={() =>
+                      props.onMoveProjectToOrganizationFolder(props.selectedProjectKey!, folder.id)
+                    }
+                  >
+                    <NativeHeaderToolbar.Label>{folder.name}</NativeHeaderToolbar.Label>
                   </NativeHeaderToolbar.MenuAction>
                 ))}
               </NativeHeaderToolbar.Menu>

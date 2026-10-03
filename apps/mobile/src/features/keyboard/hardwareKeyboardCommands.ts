@@ -1,8 +1,14 @@
-import { EnvironmentId, ThreadId, type ThreadJumpKeybindingCommand } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ThreadId,
+  type OrganizationWorkspaceJumpKeybindingCommand,
+  type ThreadJumpKeybindingCommand,
+} from "@t3tools/contracts";
 import { useEffect } from "react";
 
 export type HardwareKeyboardCommand =
   | ThreadJumpKeybindingCommand
+  | OrganizationWorkspaceJumpKeybindingCommand
   | "commandPalette"
   | "paletteNext"
   | "palettePrevious"
@@ -14,7 +20,10 @@ export type HardwareKeyboardCommand =
   | "terminal"
   | "review"
   | "copyThreadReference"
-  | "toggleSidebar";
+  | "toggleSidebar"
+  | "organizationWorkspace.previous"
+  | "organizationWorkspace.next"
+  | "organizationWorkspace.picker";
 
 type CommandHandler = (command: HardwareKeyboardCommand) => boolean | void;
 

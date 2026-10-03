@@ -59,6 +59,7 @@ import {
 } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
+import { OrganizationState } from "./organization.ts";
 import {
   TurnTokenUsage,
   ToolActivitySurface,
@@ -1778,6 +1779,7 @@ export type OrchestrationV2ThreadShellSnapshot = typeof OrchestrationV2ThreadShe
 export const OrchestrationV2ShellSnapshot = Schema.Struct({
   ...OrchestrationV2ThreadShellSnapshot.fields,
   projects: Schema.Array(OrchestrationProjectShell),
+  organization: Schema.optional(OrganizationState),
 });
 export type OrchestrationV2ShellSnapshot = typeof OrchestrationV2ShellSnapshot.Type;
 
@@ -1794,6 +1796,11 @@ export const OrchestrationV2ShellStreamItem = Schema.Union([
      * snapshots. Older clients ignore the field.
      */
     resolvedRepositoryIdentityRoots: Schema.optionalKey(Schema.Array(Schema.String)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("organization.updated"),
+    sequence: NonNegativeInt,
+    organization: OrganizationState,
   }),
   Schema.Struct({
     kind: Schema.Literal("project.updated"),

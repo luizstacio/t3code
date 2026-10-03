@@ -11,6 +11,7 @@
  * @module OrchestrationEventStore
  */
 import type {
+  ApplicationOrganizationEvent,
   ApplicationProjectEvent,
   ApplicationStoredEvent,
   CommandId,
@@ -31,6 +32,12 @@ export type UnsequencedProjectEvent = ApplicationProjectEvent extends infer Even
     : never
   : never;
 
+export type UnsequencedOrganizationEvent = ApplicationOrganizationEvent extends infer Event
+  ? Event extends ApplicationOrganizationEvent
+    ? Omit<Event, "sequence">
+    : never
+  : never;
+
 /**
  * OrchestrationEventStoreShape - Service API for orchestration event persistence.
  */
@@ -39,6 +46,10 @@ export interface OrchestrationEventStoreShape {
   readonly appendProjectEvent: (
     event: UnsequencedProjectEvent,
   ) => Effect.Effect<ApplicationProjectEvent, OrchestrationEventStoreError>;
+
+  readonly appendOrganizationEvent: (
+    event: UnsequencedOrganizationEvent,
+  ) => Effect.Effect<ApplicationOrganizationEvent, OrchestrationEventStoreError>;
 
   /** Append V2 agent events to the same globally ordered application log. */
   readonly appendAgentEvents: (input: {

@@ -439,6 +439,17 @@ describe("applyShellStreamEvent", () => {
     expect(next.snapshotSequence).toBe(5);
   });
 
+  it("applies organization deltas at the application sequence", () => {
+    const organization = { workspaces: [], folders: [], memberships: [] };
+    const next = applyShellStreamEvent(v2ShellSnapshot, {
+      kind: "organization.updated",
+      sequence: 6,
+      organization,
+    });
+    expect(next.organization).toEqual(organization);
+    expect(next.snapshotSequence).toBe(6);
+  });
+
   it("leaves unknown future events unchanged", () => {
     const next = applyShellStreamEvent(v2ShellSnapshot, {
       kind: "future.event",

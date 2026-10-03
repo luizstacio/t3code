@@ -34,6 +34,20 @@ export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [
 export type ModelPickerJumpKeybindingCommand =
   (typeof MODEL_PICKER_JUMP_KEYBINDING_COMMANDS)[number];
 
+export const ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS = [
+  "organizationWorkspace.jump.1",
+  "organizationWorkspace.jump.2",
+  "organizationWorkspace.jump.3",
+  "organizationWorkspace.jump.4",
+  "organizationWorkspace.jump.5",
+  "organizationWorkspace.jump.6",
+  "organizationWorkspace.jump.7",
+  "organizationWorkspace.jump.8",
+  "organizationWorkspace.jump.9",
+] as const;
+export type OrganizationWorkspaceJumpKeybindingCommand =
+  (typeof ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS)[number];
+
 const THREAD_KEYBINDING_COMMANDS = [
   "thread.stop",
   "thread.steerQueuedMessage",
@@ -58,6 +72,10 @@ export type ModelPickerKeybindingCommand = (typeof MODEL_PICKER_KEYBINDING_COMMA
 
 export const STATIC_KEYBINDING_COMMANDS = [
   "sidebar.toggle",
+  "organizationWorkspace.previous",
+  "organizationWorkspace.next",
+  "organizationWorkspace.picker",
+  ...ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS,
   "navigation.back",
   "navigation.forward",
   "terminal.toggle",

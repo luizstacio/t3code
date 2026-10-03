@@ -25,10 +25,12 @@ import { cn } from "../../lib/cn";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { T3KeyboardCommands } from "../../native/T3KeyboardCommands";
 import { useProjects, useThreadShell, useThreadShells } from "../../state/entities";
+import { useOrganizationWorkspaceContent } from "../../state/organization";
 import { useThreadSearch } from "../../state/queries";
 import { useWorkspaceEnvironments } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { useHomeListOptions } from "../home/home-list-options";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { ThreadSearchMatchExcerpt } from "../threads/thread-search-match";
 import {
@@ -64,6 +66,7 @@ const ACTION_ICONS: Record<string, AppSymbolName> = {
 };
 
 function itemIcon(item: CommandPaletteItem): AppSymbolName {
+  if (item.key.startsWith("organizationWorkspace:")) return "folder";
   if (item.kind === "project") return "folder";
   if (item.kind === "thread") return "text.bubble";
   return ACTION_ICONS[item.key] ?? "ellipsis";
@@ -134,6 +137,7 @@ function PaletteRow(props: {
 /** Mounted only while open, so the app root does not subscribe to the full thread catalog. */
 export function CommandPalette(props: {
   readonly pathname: string;
+  readonly initialQuery?: string;
   readonly onClose: () => void;
   readonly onCommand: (command: HardwareKeyboardCommand) => void;
 }) {
@@ -147,9 +151,20 @@ export function CommandPalette(props: {
   const activeThread = useThreadShell(activeThreadRef);
   const environments = useWorkspaceEnvironments();
   const { savedConnectionsById } = useSavedRemoteConnections();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(props.initialQuery ?? "");
   const [selection, setSelection] = useState<string | null>(null);
   const [visible, setVisible] = useState(true);
+  const availableEnvironmentIds = useMemo(
+    () => new Set(environments.map(({ environmentId }) => environmentId)),
+    [environments],
+  );
+  const { options, setActiveOrganizationWorkspaceId } = useHomeListOptions(availableEnvironmentIds);
+  const organizationContent = useOrganizationWorkspaceContent({
+    selectedWorkspaceId: options.activeOrganizationWorkspaceId,
+    setSelectedWorkspaceId: setActiveOrganizationWorkspaceId,
+    projects,
+    threads,
+  });
   const pendingAction = useRef<(() => void) | null>(null);
   const closing = useRef(false);
   const inputRef = useRef<TextInputInstance>(null);
@@ -260,6 +275,17 @@ export function CommandPalette(props: {
           }),
       },
     ];
+    actions.push(
+      ...organizationContent.workspaces.map((workspace) => ({
+        key: `organizationWorkspace:${workspace.id}`,
+        kind: "action" as const,
+        title: `Switch to ${workspace.name}`,
+        detail:
+          workspace.id === organizationContent.activeWorkspaceId ? "Current workspace" : undefined,
+        searchTerms: ["workspace", "organization", "team", workspace.name],
+        run: () => setActiveOrganizationWorkspaceId(workspace.id),
+      })),
+    );
     const projectByKey = new Map(
       projects.map((project) => [scopedProjectKey(project.environmentId, project.id), project]),
     );
@@ -346,10 +372,13 @@ export function CommandPalette(props: {
     activeThread,
     activeThreadRef,
     navigation,
+    organizationContent.activeWorkspaceId,
+    organizationContent.workspaces,
     projects,
     runCommand,
     savedConnectionsById,
     selectThread,
+    setActiveOrganizationWorkspaceId,
     threads,
   ]);
   const results = useMemo(

@@ -10,6 +10,17 @@ import PullRequestFilesViewed from "./Migrations/053_PullRequestFilesViewed.ts";
 import RemoveRedundantProjectionIndexes from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
 import OrchestrationV2 from "./Migrations/055_OrchestrationV2.ts";
 
+const WorkspaceForkProjection = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    CREATE TABLE projection_organization (
+      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+      state_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `;
+});
+
 // The V2 schema is unchanged from the published September 15–16 previews.
 const seedPreview = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -37,6 +48,7 @@ describe("V2 preview upgrade", () => {
         [53, "PullRequestFilesViewed"],
         [54, "ProjectionThreadsAutoSettleDisabledAt"],
         [56, "RemoveRedundantProjectionIndexes"],
+        [57, "ProjectionOrganization"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -116,7 +128,38 @@ describe("V2 preview upgrade", () => {
         [53, "PullRequestFilesViewed"],
         [54, "ProjectionThreadsAutoSettleDisabledAt"],
         [56, "RemoveRedundantProjectionIndexes"],
+        [57, "ProjectionOrganization"],
       ]);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("preserves the workspace fork projection while reclaiming migration 55 for V2", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 54 });
+      yield* Migrator.make({})({
+        loader: Migrator.fromRecord({ "55_ProjectionOrganization": WorkspaceForkProjection }),
+      });
+      const stateJson =
+        '{"workspaces":[{"id":"workspace","name":"Team","orderKey":"a","createdAt":"2026-10-01T00:00:00.000Z","updatedAt":"2026-10-01T00:00:00.000Z"}],"folders":[],"memberships":[]}';
+      yield* sql`INSERT INTO projection_organization (singleton, state_json, updated_at) VALUES (1, ${stateJson}, '2026-10-01T00:00:00.000Z')`;
+
+      assert.deepStrictEqual(yield* runMigrations(), [
+        [55, "OrchestrationV2"],
+        [56, "RemoveRedundantProjectionIndexes"],
+        [57, "ProjectionOrganization"],
+      ]);
+      assert.deepStrictEqual(
+        yield* sql`SELECT state_json FROM projection_organization WHERE singleton = 1`,
+        [{ state_json: stateJson }],
+      );
+      const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+        SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
+      `;
+      assert.deepStrictEqual(
+        history.map((row) => [row.migration_id, row.name] as const),
+        migrationManifest,
+      );
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 

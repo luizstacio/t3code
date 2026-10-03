@@ -5,6 +5,7 @@ import {
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
+  ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS,
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
@@ -20,6 +21,26 @@ type WhenToken =
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle" },
+  {
+    key: "mod+alt+[",
+    command: "organizationWorkspace.previous",
+    when: "!terminalFocus && !editableFocus",
+  },
+  {
+    key: "mod+alt+]",
+    command: "organizationWorkspace.next",
+    when: "!terminalFocus && !editableFocus",
+  },
+  {
+    key: "mod+alt+w",
+    command: "organizationWorkspace.picker",
+    when: "!terminalFocus && !editableFocus",
+  },
+  ...ORGANIZATION_WORKSPACE_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `mod+alt+${index + 1}`,
+    command,
+    when: "!terminalFocus && !editableFocus",
+  })),
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
   { key: "mod+j", command: "terminal.toggle" },

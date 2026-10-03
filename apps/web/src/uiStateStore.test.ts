@@ -23,6 +23,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKey: null,
+    activeOrganizationWorkspaceId: null,
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
@@ -193,6 +194,7 @@ describe("parsePersistedState", () => {
     });
 
     expect(parsed).toEqual({
+      activeOrganizationWorkspaceId: null,
       projectExpandedById: {
         logical: false,
       },
@@ -315,6 +317,7 @@ describe("uiStateStore persistence", () => {
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
     expect(persisted).toEqual({
+      activeOrganizationWorkspaceId: null,
       projectExpandedById: {
         logical: false,
       },

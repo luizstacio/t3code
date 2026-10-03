@@ -1,4 +1,10 @@
-import { CommandId, EventId, ProviderSessionId, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  EventId,
+  OrganizationWorkspaceId,
+  ProviderSessionId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -112,6 +118,37 @@ it.effect("keeps application and scoped agent high-water marks separate from leg
     assert.equal(yield* store.latestApplicationSequence, legacyProject.sequence);
     assert.equal(yield* store.latestAgentSequence(), 0);
     assert.equal(yield* store.latestAgentSequence(target), 0);
+  }).pipe(Effect.provide(Layer.fresh(eventStoreLayer))),
+);
+
+it.effect("appends and replays organization events in the shared application sequence", () =>
+  Effect.gen(function* () {
+    const store = yield* OrchestrationEventStore.OrchestrationEventStore;
+    const event = yield* store.appendOrganizationEvent({
+      eventId: EventId.make("organization-event"),
+      aggregateKind: "organization",
+      aggregateId: "organization",
+      type: "organization.workspace-created",
+      occurredAt,
+      commandId: CommandId.make("organization-command"),
+      causationEventId: null,
+      correlationId: CommandId.make("organization-command"),
+      metadata: {},
+      payload: {
+        workspace: {
+          id: OrganizationWorkspaceId.make("workspace"),
+          name: "Team",
+          orderKey: "a",
+          createdAt: occurredAt,
+          updatedAt: occurredAt,
+        },
+      },
+    });
+    assert.equal(yield* store.latestApplicationSequence, event.sequence);
+    const replay = yield* store
+      .readApplicationEvents({ afterSequence: 0, throughSequence: event.sequence })
+      .pipe(Stream.runCollect);
+    assert.deepStrictEqual(Array.from(replay), [event]);
   }).pipe(Effect.provide(Layer.fresh(eventStoreLayer))),
 );
 

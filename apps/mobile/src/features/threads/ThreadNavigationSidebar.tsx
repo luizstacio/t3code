@@ -28,6 +28,7 @@ import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useProjects, useNavigationThreadShells } from "../../state/entities";
+import { useOrganizationWorkspaceContent } from "../../state/organization";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
 import { usePendingThreadOrder } from "../../state/thread-order";
@@ -43,6 +44,7 @@ import { buildHomeListFilterMenu } from "../home/home-list-filter-menu";
 import { buildHomeProjectScopes } from "../home/homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
+import { useOrganizationCreationActions } from "../home/useOrganizationCreationActions";
 import { useThreadListActions } from "../home/useThreadListActions";
 import {
   getConnectionAwareBrandHeaderOptions,
@@ -134,8 +136,8 @@ function ThreadNavigationSidebarPane(
 
   const insets = useSafeAreaInsets();
   const { fabClearance } = useAndroidControlSizing();
-  const projects = useProjects();
-  const threads = useNavigationThreadShells();
+  const allProjects = useProjects();
+  const allThreads = useNavigationThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const searchInputRef = useRef<TextInputInstance>(null);
@@ -173,7 +175,21 @@ function ThreadNavigationSidebarPane(
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
   );
-  const { options, setSelectedEnvironmentId } = useHomeListOptions(availableEnvironmentIds);
+  const { options, setActiveOrganizationWorkspaceId, setSelectedEnvironmentId } =
+    useHomeListOptions(availableEnvironmentIds);
+  const organizationContent = useOrganizationWorkspaceContent({
+    selectedWorkspaceId: options.activeOrganizationWorkspaceId,
+    setSelectedWorkspaceId: setActiveOrganizationWorkspaceId,
+    projects: allProjects,
+    threads: allThreads,
+  });
+  const { projects, threads } = organizationContent;
+  const organizationCreation = useOrganizationCreationActions({
+    workspaces: organizationContent.workspaces,
+    activeWorkspace: organizationContent.activeWorkspace,
+    organization: organizationContent.organization,
+    setActiveWorkspaceId: setActiveOrganizationWorkspaceId,
+  });
   const searchEnvironmentIds = useMemo(
     () =>
       options.selectedEnvironmentId === null
@@ -460,6 +476,27 @@ function ThreadNavigationSidebarPane(
   ]);
   const listMenuActions = useMemo<MenuAction[]>(
     () => [
+      ...(organizationContent.workspaces.length === 0
+        ? ([{ id: "workspace:create", title: "New workspace…" }] satisfies MenuAction[])
+        : ([
+            {
+              id: "workspace",
+              title: "Workspace",
+              subactions: organizationContent.workspaces
+                .map((workspace) => ({
+                  id: `workspace:${workspace.id}`,
+                  title: workspace.name,
+                  state:
+                    organizationContent.activeWorkspaceId === workspace.id
+                      ? ("on" as const)
+                      : ("off" as const),
+                }))
+                .concat([
+                  { id: "workspace:create", title: "New workspace…", state: "off" },
+                  { id: "folder:create", title: "New folder…", state: "off" },
+                ]),
+            },
+          ] satisfies MenuAction[])),
       {
         id: "environment",
         title: "Environment",
@@ -502,11 +539,26 @@ function ThreadNavigationSidebarPane(
             },
           ] satisfies MenuAction[])),
     ],
-    [environments, options, projectFilterOptions, selectedProjectKey],
+    [environments, options, organizationContent, projectFilterOptions, selectedProjectKey],
   );
   const handleListMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
       const event = nativeEvent.event;
+      if (event === "workspace:create") {
+        organizationCreation.onCreateWorkspace();
+        return;
+      }
+      if (event === "folder:create") {
+        organizationCreation.onCreateFolder();
+        return;
+      }
+      if (event.startsWith("workspace:")) {
+        const workspace = organizationContent.workspaces.find(
+          (candidate) => candidate.id === event.slice("workspace:".length),
+        );
+        if (workspace) setActiveOrganizationWorkspaceId(workspace.id);
+        return;
+      }
       if (event === "environment:all") {
         setSelectedEnvironmentId(null);
         return;
@@ -530,7 +582,14 @@ function ThreadNavigationSidebarPane(
         return;
       }
     },
-    [environments, projectFilterOptions, setSelectedEnvironmentId],
+    [
+      environments,
+      organizationContent.workspaces,
+      organizationCreation,
+      projectFilterOptions,
+      setActiveOrganizationWorkspaceId,
+      setSelectedEnvironmentId,
+    ],
   );
 
   const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState<number | null>(null);
@@ -723,6 +782,19 @@ function ThreadNavigationSidebarPane(
               onUnpinThread={unpinThread}
               onSetThreadAutoSettle={setThreadAutoSettle}
               onMoveThread={moveThread}
+              organizationFolders={(organizationContent.activeWorkspace?.folders ?? []).map(
+                ({ folder, memberships }) => ({
+                  id: folder.id,
+                  name: folder.name,
+                  selected: memberships.some(
+                    (membership) =>
+                      membership.item.kind === "thread" &&
+                      membership.item.environmentId === thread.environmentId &&
+                      membership.item.threadId === thread.id,
+                  ),
+                }),
+              )}
+              onMoveToOrganizationFolder={organizationCreation.onMoveThreadToFolder}
               onSwipeableClose={handleSwipeableClose}
               onSwipeableWillOpen={handleSwipeableWillOpen}
               simultaneousSwipeGesture={sidebarScrollGesture}
@@ -769,6 +841,8 @@ function ThreadNavigationSidebarPane(
       handleSwipeableWillOpen,
       machineByEnvironmentId,
       moveThread,
+      organizationContent.activeWorkspace,
+      organizationCreation.onMoveThreadToFolder,
       openPendingTask,
       pinReorderEnvironmentIds,
       pinThread,
@@ -811,14 +885,42 @@ function ThreadNavigationSidebarPane(
   const filterMenu = useMemo(
     () =>
       buildHomeListFilterMenu({
+        organizationWorkspaces: organizationContent.workspaces,
+        selectedOrganizationWorkspaceId: organizationContent.activeWorkspaceId,
+        organizationFolders: (organizationContent.activeWorkspace?.folders ?? []).map(
+          ({ folder }) => ({ id: folder.id, name: folder.name }),
+        ),
         environments,
         projects: projectFilterOptions,
         selectedEnvironmentId: options.selectedEnvironmentId,
         selectedProjectKey,
         onEnvironmentChange: setSelectedEnvironmentId,
         onProjectChange: setSelectedProjectKey,
+        onOrganizationWorkspaceChange: setActiveOrganizationWorkspaceId,
+        onCreateOrganizationFolder: organizationCreation.onCreateFolder,
+        onCreateOrganizationWorkspace: organizationCreation.onCreateWorkspace,
+        onMoveProjectToOrganizationFolder: (projectKey, folderId) => {
+          const scope = projectScopes.find((candidate) => candidate.key === projectKey);
+          for (const projectRef of scope?.projectRefs ?? []) {
+            organizationCreation.onMoveProjectToFolder(
+              projectRef.environmentId,
+              projectRef.projectId,
+              folderId,
+            );
+          }
+        },
       }),
-    [environments, options, projectFilterOptions, selectedProjectKey, setSelectedEnvironmentId],
+    [
+      environments,
+      options,
+      organizationContent,
+      organizationCreation,
+      projectFilterOptions,
+      projectScopes,
+      selectedProjectKey,
+      setActiveOrganizationWorkspaceId,
+      setSelectedEnvironmentId,
+    ],
   );
   const nativeHeaderItems = useMemo(
     () =>

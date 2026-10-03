@@ -362,6 +362,10 @@
     "./device/duo-control": {
       "types": "./src/device/duoControl.ts",
       "default": "./src/device/duoControl.ts"
+    },
+    "./state/organization": {
+      "types": "./src/state/organization.ts",
+      "default": "./src/state/organization.ts"
     }
   },
   "scripts": {

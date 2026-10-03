@@ -16,8 +16,8 @@ import type { OrchestrationCommandReceiptRepositoryError } from "../Errors.ts";
 
 export const OrchestrationCommandReceipt = Schema.Struct({
   commandId: CommandId,
-  aggregateKind: Schema.Literals(["project", "thread"]),
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateKind: Schema.Literals(["organization", "project", "thread"]),
+  aggregateId: Schema.Union([Schema.Literal("organization"), ProjectId, ThreadId]),
   commandType: Schema.String,
   acceptedAt: IsoDateTime,
   resultSequence: NonNegativeInt,

@@ -10,6 +10,7 @@ import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/Stac
 import { useProjects, useNavigationThreadShells } from "../../state/entities";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
+import { useOrganizationWorkspaceContent } from "../../state/organization";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { WorkspaceEmptyDetail } from "../layout/WorkspaceEmptyDetail";
@@ -22,6 +23,7 @@ import { useHomeListOptions } from "./home-list-options";
 import { useHomeThreadSelection } from "./home-thread-navigation";
 import { buildHomeProjectScopes } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
+import { useOrganizationCreationActions } from "./useOrganizationCreationActions";
 import { useThreadListActions } from "./useThreadListActions";
 import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle";
 
@@ -30,8 +32,8 @@ import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle
 export function HomeRouteScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const { layout, panes } = useAdaptiveWorkspaceLayout();
-  const projects = useProjects();
-  const threads = useNavigationThreadShells();
+  const allProjects = useProjects();
+  const allThreads = useNavigationThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
@@ -93,21 +95,42 @@ export function HomeRouteScreen() {
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
   );
-  const { options: listOptions, setSelectedEnvironmentId } =
-    useHomeListOptions(availableEnvironmentIds);
+  const {
+    options: listOptions,
+    setActiveOrganizationWorkspaceId,
+    setSelectedEnvironmentId,
+  } = useHomeListOptions(availableEnvironmentIds);
+  const organizationContent = useOrganizationWorkspaceContent({
+    selectedWorkspaceId: listOptions.activeOrganizationWorkspaceId,
+    setSelectedWorkspaceId: setActiveOrganizationWorkspaceId,
+    projects: allProjects,
+    threads: allThreads,
+  });
+  const { projects, threads } = organizationContent;
+  const organizationCreation = useOrganizationCreationActions({
+    workspaces: organizationContent.workspaces,
+    activeWorkspace: organizationContent.activeWorkspace,
+    organization: organizationContent.organization,
+    setActiveWorkspaceId: setActiveOrganizationWorkspaceId,
+  });
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
-  const projectFilterOptions = useMemo(
+  const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
         projects,
         environmentId: selectedEnvironmentId,
         projectGroupingMode: listOptions.projectGroupingMode,
-      }).map((scope) => ({
+      }),
+    [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
+  );
+  const projectFilterOptions = useMemo(
+    () =>
+      projectScopes.map((scope) => ({
         key: scope.key,
         label: scope.title,
       })),
-    [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
+    [projectScopes],
   );
   useEffect(() => {
     if (
@@ -185,11 +208,29 @@ export function HomeRouteScreen() {
         <HomeHeader
           environments={environments}
           projects={projectFilterOptions}
+          organizationFolders={(organizationContent.activeWorkspace?.folders ?? []).map(
+            ({ folder }) => ({ id: folder.id, name: folder.name }),
+          )}
+          organizationWorkspaces={organizationContent.workspaces}
+          selectedOrganizationWorkspaceId={organizationContent.activeWorkspaceId}
           searchQuery={searchQuery}
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
           onEnvironmentChange={setSelectedEnvironmentId}
           onProjectChange={setSelectedProjectKey}
+          onOrganizationWorkspaceChange={setActiveOrganizationWorkspaceId}
+          onCreateOrganizationFolder={organizationCreation.onCreateFolder}
+          onCreateOrganizationWorkspace={organizationCreation.onCreateWorkspace}
+          onMoveProjectToOrganizationFolder={(projectKey, folderId) => {
+            const scope = projectScopes.find((candidate) => candidate.key === projectKey);
+            for (const projectRef of scope?.projectRefs ?? []) {
+              organizationCreation.onMoveProjectToFolder(
+                projectRef.environmentId,
+                projectRef.projectId,
+                folderId,
+              );
+            }
+          }}
           onOpenEnvironments={() =>
             navigation.navigate("SettingsSheet", {
               screen: "SettingsContent",
@@ -252,6 +293,8 @@ export function HomeRouteScreen() {
           }}
           onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
           pendingTasks={pendingTasks}
+          organizationFolders={organizationContent.activeWorkspace?.folders ?? []}
+          onMoveThreadToOrganizationFolder={organizationCreation.onMoveThreadToFolder}
           projectGroupingMode={listOptions.projectGroupingMode}
           projects={projects}
           projectSortOrder={listOptions.projectSortOrder}

@@ -18,6 +18,16 @@ export const reconcileV2PreviewMigration = Effect.fn("reconcileV2PreviewMigratio
       const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
         SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 53
       `;
+      const workspaceFork = history.find(
+        (row) => row.migration_id === 55 && row.name === "ProjectionOrganization",
+      );
+      if (workspaceFork !== undefined) {
+        // The workspace fork shipped its projection as migration 55 before
+        // upstream assigned that id to V2. Preserve the table, but free the
+        // ledger id so the upstream V2 migration cannot be silently skipped.
+        yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id IN (55, 56)`;
+        return [];
+      }
       const legacy = history.find(
         (row) =>
           row.name === "OrchestrationV2" && (row.migration_id === 53 || row.migration_id === 54),

@@ -10,6 +10,11 @@ import {
   type ChatAttachment,
   type MessageId,
   type ModelSelection,
+  type OrganizationFolderId,
+  type OrganizationItemReference,
+  type OrganizationMembershipId,
+  type OrganizationMutation,
+  type OrganizationWorkspaceId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
   type PlanId,
@@ -63,6 +68,47 @@ export interface UpdateProjectInput extends CommandMetadata {
 export interface DeleteProjectInput extends CommandMetadata {
   readonly projectId: ProjectId;
   readonly force?: boolean;
+}
+
+export interface CreateOrganizationWorkspaceInput extends CommandMetadata {
+  readonly workspaceId: OrganizationWorkspaceId;
+  readonly name: string;
+  readonly orderKey: string;
+}
+export interface UpdateOrganizationWorkspaceInput extends CommandMetadata {
+  readonly workspaceId: OrganizationWorkspaceId;
+  readonly name?: string;
+  readonly orderKey?: string;
+  readonly updatedAt?: string;
+}
+export interface DeleteOrganizationWorkspaceInput extends CommandMetadata {
+  readonly workspaceId: OrganizationWorkspaceId;
+}
+export interface CreateOrganizationFolderInput extends CommandMetadata {
+  readonly folderId: OrganizationFolderId;
+  readonly workspaceId: OrganizationWorkspaceId;
+  readonly name: string;
+  readonly orderKey: string;
+}
+export interface UpdateOrganizationFolderInput extends CommandMetadata {
+  readonly folderId: OrganizationFolderId;
+  readonly workspaceId?: OrganizationWorkspaceId;
+  readonly name?: string;
+  readonly orderKey?: string;
+  readonly updatedAt?: string;
+}
+export interface DeleteOrganizationFolderInput extends CommandMetadata {
+  readonly folderId: OrganizationFolderId;
+}
+export interface UpsertOrganizationMembershipInput extends CommandMetadata {
+  readonly membershipId: OrganizationMembershipId;
+  readonly folderId: OrganizationFolderId;
+  readonly item: OrganizationItemReference;
+  readonly orderKey: string;
+  readonly updatedAt?: string;
+}
+export interface DeleteOrganizationMembershipInput extends CommandMetadata {
+  readonly membershipId: OrganizationMembershipId;
 }
 
 export interface CreateThreadInput extends CommandMetadata {
@@ -331,6 +377,102 @@ const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
       },
 ) {
   return yield* request(WS_METHODS.projectsMutate, mutation);
+});
+
+const mutateOrganization = (mutation: OrganizationMutation) =>
+  request(WS_METHODS.organizationMutate, mutation);
+
+export const createOrganizationWorkspace = Effect.fn(
+  "EnvironmentCommands.createOrganizationWorkspace",
+)(function* (input: CreateOrganizationWorkspaceInput) {
+  return yield* mutateOrganization({
+    type: "organization.workspace.create",
+    commandId: yield* allocateCommandId(input),
+    workspaceId: input.workspaceId,
+    name: input.name,
+    orderKey: input.orderKey,
+  });
+});
+
+export const updateOrganizationWorkspace = Effect.fn(
+  "EnvironmentCommands.updateOrganizationWorkspace",
+)(function* (input: UpdateOrganizationWorkspaceInput) {
+  return yield* mutateOrganization({
+    type: "organization.workspace.update",
+    commandId: yield* allocateCommandId(input),
+    workspaceId: input.workspaceId,
+    ...(input.name === undefined ? {} : { name: input.name }),
+    ...(input.orderKey === undefined ? {} : { orderKey: input.orderKey }),
+  });
+});
+
+export const deleteOrganizationWorkspace = Effect.fn(
+  "EnvironmentCommands.deleteOrganizationWorkspace",
+)(function* (input: DeleteOrganizationWorkspaceInput) {
+  return yield* mutateOrganization({
+    type: "organization.workspace.delete",
+    commandId: yield* allocateCommandId(input),
+    workspaceId: input.workspaceId,
+  });
+});
+
+export const createOrganizationFolder = Effect.fn("EnvironmentCommands.createOrganizationFolder")(
+  function* (input: CreateOrganizationFolderInput) {
+    return yield* mutateOrganization({
+      type: "organization.folder.create",
+      commandId: yield* allocateCommandId(input),
+      folderId: input.folderId,
+      workspaceId: input.workspaceId,
+      name: input.name,
+      orderKey: input.orderKey,
+    });
+  },
+);
+
+export const updateOrganizationFolder = Effect.fn("EnvironmentCommands.updateOrganizationFolder")(
+  function* (input: UpdateOrganizationFolderInput) {
+    return yield* mutateOrganization({
+      type: "organization.folder.update",
+      commandId: yield* allocateCommandId(input),
+      folderId: input.folderId,
+      ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.orderKey === undefined ? {} : { orderKey: input.orderKey }),
+    });
+  },
+);
+
+export const deleteOrganizationFolder = Effect.fn("EnvironmentCommands.deleteOrganizationFolder")(
+  function* (input: DeleteOrganizationFolderInput) {
+    return yield* mutateOrganization({
+      type: "organization.folder.delete",
+      commandId: yield* allocateCommandId(input),
+      folderId: input.folderId,
+    });
+  },
+);
+
+export const upsertOrganizationMembership = Effect.fn(
+  "EnvironmentCommands.upsertOrganizationMembership",
+)(function* (input: UpsertOrganizationMembershipInput) {
+  return yield* mutateOrganization({
+    type: "organization.membership.upsert",
+    commandId: yield* allocateCommandId(input),
+    membershipId: input.membershipId,
+    folderId: input.folderId,
+    item: input.item,
+    orderKey: input.orderKey,
+  });
+});
+
+export const deleteOrganizationMembership = Effect.fn(
+  "EnvironmentCommands.deleteOrganizationMembership",
+)(function* (input: DeleteOrganizationMembershipInput) {
+  return yield* mutateOrganization({
+    type: "organization.membership.delete",
+    commandId: yield* allocateCommandId(input),
+    membershipId: input.membershipId,
+  });
 });
 
 export const createProject = Effect.fn("EnvironmentCommands.createProject")(function* (

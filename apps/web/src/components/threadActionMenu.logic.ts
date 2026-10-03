@@ -10,6 +10,8 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "filter-by-project"
   | "project-settings"
+  | "organization-folder"
+  | `organization-folder:${string}`
   | "pin"
   | "unpin"
   | "settle"
@@ -41,6 +43,11 @@ export interface ThreadActionMenuState {
     /** True when the list is already scoped to this thread's project. */
     readonly isActive: boolean;
   } | null;
+  readonly organizationFolders?: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly checked: boolean;
+  }>;
   readonly isPinned: boolean;
   readonly isSettled: boolean;
   /** False while the user has turned automatic settlement off for this thread. */
@@ -135,6 +142,20 @@ export function buildThreadActionMenuItems(
               ? "Show all projects"
               : `Filter by ${state.projectFilter.label}`,
             icon: "folder-tree",
+          },
+        ]
+      : []),
+    ...(state.organizationFolders?.length
+      ? [
+          {
+            id: "organization-folder" as const,
+            label: "Move to folder",
+            icon: "folder-tree",
+            children: state.organizationFolders.map((folder) => ({
+              id: `organization-folder:${folder.id}` as const,
+              label: folder.label,
+              checked: folder.checked,
+            })),
           },
         ]
       : []),

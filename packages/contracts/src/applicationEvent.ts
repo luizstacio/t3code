@@ -14,6 +14,7 @@ import {
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import type { OrchestrationV2StoredEvent } from "./orchestrationV2.ts";
+import type { ApplicationOrganizationEvent } from "./organization.ts";
 import { ProjectIconOverride, ProjectScript } from "./project.ts";
 
 /**
@@ -121,4 +122,7 @@ export const ApplicationProjectEvent = Schema.Union([
 export type ApplicationProjectEvent = typeof ApplicationProjectEvent.Type;
 
 /** Events exposed by the retained application event source. */
-export type ApplicationStoredEvent = ApplicationProjectEvent | OrchestrationV2StoredEvent;
+export type ApplicationStoredEvent =
+  | ApplicationOrganizationEvent
+  | ApplicationProjectEvent
+  | OrchestrationV2StoredEvent;

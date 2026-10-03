@@ -145,6 +145,12 @@ export function applyShellStreamEvent(
         archivedThreads: snapshot.archivedThreads.filter((thread) => thread.id !== event.threadId),
         snapshotSequence: event.sequence,
       };
+    case "organization.updated":
+      return {
+        ...snapshot,
+        organization: event.organization,
+        snapshotSequence: event.sequence,
+      };
     default:
       return snapshot;
   }

@@ -4,9 +4,11 @@ import {
   ThreadId,
   TurnItemId,
   type OrchestrationProjectShell,
+  EMPTY_ORGANIZATION_STATE,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
+import * as Option from "effect/Option";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -30,6 +32,7 @@ import {
 } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as OrganizationStore from "./OrganizationStore.ts";
 import { buildActiveShellSnapshot } from "./ShellStream.ts";
 import { projectThreadProjectionForWire } from "./WireProjection.ts";
 
@@ -71,6 +74,11 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
     const projectStore = yield* ProjectStore.ProjectStoreV2;
+    const organizationStore = yield* Effect.serviceOption(OrganizationStore.OrganizationStore);
+    const organization = Option.match(organizationStore, {
+      onNone: () => Effect.succeed(EMPTY_ORGANIZATION_STATE),
+      onSome: (store) => store.get,
+    });
     const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
 
     const enrichProjectShells = Effect.fn("http.orchestration.enrichProjectShells")(
@@ -98,6 +106,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           const threads = yield* threadManagement.getShellSnapshot({ location: "active" });
           return buildActiveShellSnapshot({
             projects: yield* projectStore.listShells(),
+            organization: yield* organization,
             threads,
             snapshotSequence: yield* applicationEvents.latestApplicationSequence,
           });

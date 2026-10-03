@@ -23,6 +23,7 @@ import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
 import { subscribeCodexAuthCallback } from "./provider/CodexAuthCallback.ts";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
+  EMPTY_ORGANIZATION_STATE,
   AcpRegistryOperationError,
   CommandId,
   AuthAccessStreamError,
@@ -70,6 +71,7 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   ProjectMutationError,
+  OrganizationMutationError,
   ProviderUploadFeedbackError,
   ProviderSetupError,
   RelayClientInstallFailedError,
@@ -151,6 +153,8 @@ import {
   projectThreadProjectionForWire,
 } from "./orchestration-v2/WireProjection.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import * as OrganizationStore from "./orchestration-v2/OrganizationStore.ts";
+import * as OrganizationService from "./orchestration-v2/OrganizationService.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as OrchestrationEventStore from "./persistence/Services/OrchestrationEventStore.ts";
 import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErrors.ts";
@@ -243,6 +247,7 @@ import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
+const isOrganizationMutationError = Schema.is(OrganizationMutationError);
 
 const resolveDiscoveryForConfig = <A, E, R>(
   discovery: Effect.Effect<A, E, R>,
@@ -846,6 +851,11 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
     const projects = yield* ProjectStore.ProjectStoreV2;
+    const organizationStore = yield* Effect.serviceOption(OrganizationStore.OrganizationStore);
+    const organization = Option.match(organizationStore, {
+      onNone: () => Effect.succeed(EMPTY_ORGANIZATION_STATE),
+      onSome: (store) => store.get,
+    });
     const projectService = yield* ProjectService.ProjectService;
     const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
 
@@ -871,6 +881,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           const threads = yield* threadManagement.getShellSnapshot({ location: "active" });
           return buildActiveShellSnapshot({
             projects: yield* projects.listShells(),
+            organization: yield* organization,
             threads,
             snapshotSequence: yield* applicationEvents.latestApplicationSequence,
           });
@@ -919,6 +930,13 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
         (stored) =>
           Effect.gen(function* () {
             if ("aggregateKind" in stored) {
+              if (stored.aggregateKind === "organization") {
+                return {
+                  kind: "organization.updated" as const,
+                  sequence: stored.sequence,
+                  organization: yield* organization,
+                };
+              }
               return yield* projectItem(stored);
             }
             const shell = yield* threadManagement.getThreadShell(stored.event.threadId);
@@ -1101,6 +1119,7 @@ const makeWsRpcLayer = (
       const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
       const projectStore = yield* ProjectStore.ProjectStoreV2;
       const projectService = yield* ProjectService.ProjectService;
+      const organizationService = yield* OrganizationService.OrganizationService;
       const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
       const threadSearch = yield* ThreadSearch.ThreadSearch;
 
@@ -3060,6 +3079,22 @@ const makeWsRpcLayer = (
                         : "Failed to mutate project.",
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [WS_METHODS.organizationMutate]: (mutation) =>
+          observeRpcEffect(
+            WS_METHODS.organizationMutate,
+            startup.enqueueCommand(organizationService.mutate(mutation)).pipe(
+              Effect.mapError((cause) =>
+                isOrganizationMutationError(cause)
+                  ? cause
+                  : new OrganizationMutationError({
+                      commandId: mutation.commandId,
+                      message: "Failed to mutate organization.",
+                      cause,
+                    }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },
