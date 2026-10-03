@@ -69,4 +69,24 @@ describe("OrganizationState", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts the project color tokens and rejects anything else", () => {
+    const workspace = (color: string) => ({
+      workspaces: [
+        {
+          id: "workspace-1",
+          name: "Team",
+          color,
+          icon: { kind: "lucide", name: "rocket" },
+          orderKey: "a",
+          createdAt: "2026-10-01T00:00:00.000Z",
+          updatedAt: "2026-10-01T00:00:00.000Z",
+        },
+      ],
+      folders: [],
+      memberships: [],
+    });
+    expect(decode(workspace("violet")).workspaces[0]?.color).toBe("violet");
+    expect(() => decode(workspace("#2563eb"))).toThrow();
+  });
 });

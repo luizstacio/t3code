@@ -31,13 +31,8 @@ import {
   effectiveSnoozed,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
+import { filterOrganizationWorkspaceContent } from "@t3tools/client-runtime/state/organization";
 import {
-  filterOrganizationWorkspaceContent,
-  selectOrganizationWorkspace,
-  sortOrganizationWorkspaces,
-} from "@t3tools/client-runtime/state/organization";
-import {
-  pinOrderKeyBetween,
   resolveSettledThreadTimestamp,
   sortSettledThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
@@ -58,8 +53,6 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   OrganizationFolderId,
-  OrganizationMembershipId,
-  OrganizationWorkspaceId,
   type OrganizationItemReference,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
@@ -78,7 +71,6 @@ import {
   ClockIcon,
   EyeIcon,
   FolderIcon,
-  FolderPlusIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
@@ -127,7 +119,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { isMacPlatform, randomUUID } from "~/lib/utils";
+import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { readLocalApi } from "../localApi";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
@@ -166,7 +158,6 @@ import {
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
-import { organizationEnvironment, usePrimaryOrganizationState } from "../state/organization";
 import { useEnvironmentQuery } from "../state/query";
 import { useThreadSearch } from "../state/queries";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -181,7 +172,19 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
-import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
+import {
+  buildOrganizationFolderMenu,
+  buildThreadActionMenuItems,
+  ORGANIZATION_FOLDER_MENU_CREATE_ID,
+  ORGANIZATION_FOLDER_MENU_ID,
+  ORGANIZATION_FOLDER_MENU_PREFIX,
+  ORGANIZATION_FOLDER_MENU_REMOVE_ID,
+} from "./threadActionMenu.logic";
+import { SidebarWorkspaceSwitcher } from "./sidebar/SidebarWorkspaceSwitcher";
+import {
+  useOrganizationWorkspaces,
+  useReconcileActiveOrganizationWorkspace,
+} from "../hooks/useOrganizationWorkspaceActions";
 import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
@@ -2300,26 +2303,18 @@ export default function Sidebar() {
   const allProjects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const allThreads = useThreadShells();
-  const organization = usePrimaryOrganizationState();
-  const savedWorkspaceId = useUiStateStore((store) => store.activeOrganizationWorkspaceId);
-  const setActiveWorkspaceId = useUiStateStore((store) => store.setActiveOrganizationWorkspaceId);
-  const orderedWorkspaces = useMemo(
-    () => sortOrganizationWorkspaces(organization.workspaces),
-    [organization.workspaces],
-  );
-  const activeWorkspaceId =
-    orderedWorkspaces.find((workspace) => workspace.id === savedWorkspaceId)?.id ??
-    orderedWorkspaces[0]?.id ??
-    null;
-  useEffect(() => {
-    if (activeWorkspaceId !== savedWorkspaceId) setActiveWorkspaceId(activeWorkspaceId);
-  }, [activeWorkspaceId, savedWorkspaceId, setActiveWorkspaceId]);
-  const activeWorkspace = useMemo(
-    () =>
-      activeWorkspaceId === null
-        ? null
-        : selectOrganizationWorkspace(organization, activeWorkspaceId),
-    [activeWorkspaceId, organization],
+  const organizationWorkspaces = useOrganizationWorkspaces();
+  const {
+    organization,
+    activeWorkspaceId,
+    activeWorkspace,
+    moveItemToFolder,
+    removeItemFromFolder,
+  } = organizationWorkspaces;
+  useReconcileActiveOrganizationWorkspace(
+    activeWorkspaceId,
+    organizationWorkspaces.savedWorkspaceId,
+    organizationWorkspaces.setActiveWorkspaceId,
   );
   const { projects, threads } = useMemo(
     () =>
@@ -2421,165 +2416,6 @@ export default function Sidebar() {
   const environments = useEnvironmentIdentities();
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const createOrganizationWorkspace = useAtomCommand(organizationEnvironment.createWorkspace);
-  const createOrganizationFolder = useAtomCommand(organizationEnvironment.createFolder);
-  const updateOrganizationWorkspace = useAtomCommand(organizationEnvironment.updateWorkspace);
-  const deleteOrganizationWorkspace = useAtomCommand(organizationEnvironment.deleteWorkspace);
-  const updateOrganizationFolder = useAtomCommand(organizationEnvironment.updateFolder);
-  const deleteOrganizationFolder = useAtomCommand(organizationEnvironment.deleteFolder);
-  const upsertOrganizationMembership = useAtomCommand(organizationEnvironment.upsertMembership);
-  const handleCreateOrganizationWorkspace = useCallback(async () => {
-    if (primaryEnvironmentId === null) return;
-    const name = window.prompt("Workspace name")?.trim();
-    if (!name) return;
-    const workspaceId = OrganizationWorkspaceId.make(randomUUID());
-    const result = await createOrganizationWorkspace({
-      environmentId: primaryEnvironmentId,
-      input: {
-        workspaceId,
-        name,
-        orderKey:
-          pinOrderKeyBetween(orderedWorkspaces.at(-1)?.orderKey ?? null, null) ?? randomUUID(),
-      },
-    });
-    if (result._tag === "Success") setActiveWorkspaceId(workspaceId);
-  }, [createOrganizationWorkspace, orderedWorkspaces, primaryEnvironmentId, setActiveWorkspaceId]);
-  const handleCreateOrganizationFolder = useCallback(async () => {
-    if (primaryEnvironmentId === null || activeWorkspace === null) return;
-    const name = window.prompt("Folder name")?.trim();
-    if (!name) return;
-    await createOrganizationFolder({
-      environmentId: primaryEnvironmentId,
-      input: {
-        folderId: OrganizationFolderId.make(randomUUID()),
-        workspaceId: activeWorkspace.workspace.id,
-        name,
-        orderKey:
-          pinOrderKeyBetween(activeWorkspace.folders.at(-1)?.folder.orderKey ?? null, null) ??
-          randomUUID(),
-      },
-    });
-  }, [activeWorkspace, createOrganizationFolder, primaryEnvironmentId]);
-  const moveOrganizationItem = useCallback(
-    async (item: OrganizationItemReference, folderId: OrganizationFolderId) => {
-      if (primaryEnvironmentId === null || activeWorkspace === null) return;
-      const folder = activeWorkspace.folders.find((entry) => entry.folder.id === folderId);
-      if (folder === undefined) return;
-      const existing = organization.memberships.find((membership) =>
-        membership.item.kind === "project" && item.kind === "project"
-          ? membership.item.environmentId === item.environmentId &&
-            membership.item.projectId === item.projectId
-          : membership.item.kind === "thread" && item.kind === "thread"
-            ? membership.item.environmentId === item.environmentId &&
-              membership.item.threadId === item.threadId
-            : false,
-      );
-      await upsertOrganizationMembership({
-        environmentId: primaryEnvironmentId,
-        input: {
-          membershipId: existing?.id ?? OrganizationMembershipId.make(randomUUID()),
-          folderId,
-          item,
-          orderKey:
-            pinOrderKeyBetween(folder.memberships.at(-1)?.orderKey ?? null, null) ?? randomUUID(),
-        },
-      });
-    },
-    [activeWorkspace, organization.memberships, primaryEnvironmentId, upsertOrganizationMembership],
-  );
-  const handleManageOrganizationWorkspace = useCallback(
-    (event: ReactMouseEvent<HTMLElement>) => {
-      if (primaryEnvironmentId === null || activeWorkspace === null) return;
-      void (async () => {
-        const api = readLocalApi();
-        if (!api) return;
-        const clicked = await api.contextMenu.show(
-          [
-            { id: "workspace:rename", label: "Rename workspace", icon: "pencil" },
-            { id: "folder:create", label: "New folder", icon: "folder-plus" },
-            ...activeWorkspace.folders.map(({ folder }) => ({
-              id: `folder:${folder.id}`,
-              label: folder.name,
-              icon: "folder" as const,
-              children: [
-                { id: `folder:rename:${folder.id}`, label: "Rename", icon: "pencil" as const },
-                {
-                  id: `folder:delete:${folder.id}`,
-                  label: "Delete folder",
-                  icon: "trash" as const,
-                  destructive: true,
-                },
-              ],
-            })),
-            {
-              id: "workspace:delete",
-              label: "Delete workspace",
-              icon: "trash",
-              destructive: true,
-              separatorBefore: true,
-            },
-          ],
-          { x: event.clientX, y: event.clientY },
-        );
-        if (clicked === "workspace:rename") {
-          const name = window.prompt("Workspace name", activeWorkspace.workspace.name)?.trim();
-          if (name && name !== activeWorkspace.workspace.name)
-            await updateOrganizationWorkspace({
-              environmentId: primaryEnvironmentId,
-              input: { workspaceId: activeWorkspace.workspace.id, name },
-            });
-          return;
-        }
-        if (clicked === "folder:create") return void (await handleCreateOrganizationFolder());
-        if (clicked?.startsWith("folder:rename:")) {
-          const folder = activeWorkspace.folders.find(
-            (entry) => entry.folder.id === clicked.slice("folder:rename:".length),
-          )?.folder;
-          if (folder === undefined) return;
-          const name = window.prompt("Folder name", folder.name)?.trim();
-          if (name && name !== folder.name)
-            await updateOrganizationFolder({
-              environmentId: primaryEnvironmentId,
-              input: { folderId: folder.id, name },
-            });
-          return;
-        }
-        if (clicked?.startsWith("folder:delete:")) {
-          const confirmed = await api.dialogs.confirm(
-            "Delete this folder? Projects and threads stay intact; only its assignments are removed.",
-            { variant: "destructive" },
-          );
-          if (confirmed)
-            await deleteOrganizationFolder({
-              environmentId: primaryEnvironmentId,
-              input: {
-                folderId: OrganizationFolderId.make(clicked.slice("folder:delete:".length)),
-              },
-            });
-          return;
-        }
-        if (clicked !== "workspace:delete") return;
-        const confirmed = await api.dialogs.confirm(
-          "Delete this workspace? Projects, threads, and running agents stay intact.",
-          { variant: "destructive" },
-        );
-        if (confirmed)
-          await deleteOrganizationWorkspace({
-            environmentId: primaryEnvironmentId,
-            input: { workspaceId: activeWorkspace.workspace.id },
-          });
-      })();
-    },
-    [
-      activeWorkspace,
-      deleteOrganizationFolder,
-      deleteOrganizationWorkspace,
-      handleCreateOrganizationFolder,
-      primaryEnvironmentId,
-      updateOrganizationFolder,
-      updateOrganizationWorkspace,
-    ],
-  );
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
@@ -2841,6 +2677,24 @@ export default function Sidebar() {
     },
     [openProjectSettings],
   );
+  const applyOrganizationFolderChoice = useCallback(
+    async (clicked: string | null | undefined, items: ReadonlyArray<OrganizationItemReference>) => {
+      if (clicked === ORGANIZATION_FOLDER_MENU_REMOVE_ID) {
+        for (const item of items) await removeItemFromFolder(item);
+        return;
+      }
+      if (clicked === ORGANIZATION_FOLDER_MENU_CREATE_ID) {
+        await organizationWorkspaces.createFolder();
+        return;
+      }
+      if (!clicked?.startsWith(ORGANIZATION_FOLDER_MENU_PREFIX)) return;
+      const folderId = OrganizationFolderId.make(
+        clicked.slice(ORGANIZATION_FOLDER_MENU_PREFIX.length),
+      );
+      for (const item of items) await moveItemToFolder(item, folderId);
+    },
+    [moveItemToFolder, organizationWorkspaces, removeItemFromFolder],
+  );
   const handleProjectContextMenu = useCallback(
     (event: ReactMouseEvent<HTMLElement>, projectGroup: SidebarProjectSnapshot) => {
       event.preventDefault();
@@ -2850,55 +2704,45 @@ export default function Sidebar() {
       void (async () => {
         const api = readLocalApi();
         if (!api) return;
-        const folders = activeWorkspace?.folders ?? [];
+        const projectItems = projectGroup.memberProjectRefs.map((projectRef) => ({
+          kind: "project" as const,
+          environmentId: projectRef.environmentId,
+          projectId: projectRef.projectId,
+        }));
+        const folderMenu =
+          activeWorkspace === null
+            ? null
+            : buildOrganizationFolderMenu(
+                activeWorkspace.folders.map(({ folder, memberships }) => ({
+                  id: folder.id,
+                  label: folder.name,
+                  checked: projectItems.every((item) =>
+                    memberships.some(
+                      (membership) =>
+                        membership.item.kind === "project" &&
+                        membership.item.environmentId === item.environmentId &&
+                        membership.item.projectId === item.projectId,
+                    ),
+                  ),
+                })),
+              );
         const clicked = await api.contextMenu.show(
           [
-            ...(folders.length === 0
-              ? []
-              : [
-                  {
-                    id: "organization-folder",
-                    label: "Move to folder",
-                    icon: "folder-tree" as const,
-                    children: folders.map(({ folder, memberships }) => ({
-                      id: `organization-folder:${folder.id}`,
-                      label: folder.name,
-                      checked: projectGroup.memberProjectRefs.every((projectRef) =>
-                        memberships.some(
-                          (membership) =>
-                            membership.item.kind === "project" &&
-                            membership.item.environmentId === projectRef.environmentId &&
-                            membership.item.projectId === projectRef.projectId,
-                        ),
-                      ),
-                    })),
-                  },
-                ]),
+            ...(folderMenu ? [folderMenu] : []),
             {
               id: "project-settings",
               label: "Project settings",
               icon: "settings",
-              separatorBefore: folders.length > 0,
+              separatorBefore: folderMenu !== null,
             },
           ],
           { x: event.clientX, y: event.clientY },
         );
         if (clicked === "project-settings") return openProjectSettings(projectGroup);
-        if (!clicked?.startsWith("organization-folder:")) return;
-        const folderId = OrganizationFolderId.make(clicked.slice("organization-folder:".length));
-        for (const projectRef of projectGroup.memberProjectRefs) {
-          await moveOrganizationItem(
-            {
-              kind: "project",
-              environmentId: projectRef.environmentId,
-              projectId: projectRef.projectId,
-            },
-            folderId,
-          );
-        }
+        await applyOrganizationFolderChoice(clicked, projectItems);
       })();
     },
-    [activeWorkspace, moveOrganizationItem, openProjectSettings],
+    [activeWorkspace, applyOrganizationFolderChoice, openProjectSettings],
   );
 
   // Keep a dropped row at its destination while its server applies the
@@ -4617,11 +4461,10 @@ export default function Sidebar() {
           ),
         );
         if (clicked._tag === "Failure") return;
-        if (clicked.value?.startsWith("organization-folder:")) {
-          await moveOrganizationItem(
+        if (clicked.value?.startsWith(ORGANIZATION_FOLDER_MENU_ID)) {
+          await applyOrganizationFolderChoice(clicked.value, [
             { kind: "thread", environmentId: thread.environmentId, threadId: thread.id },
-            OrganizationFolderId.make(clicked.value.slice("organization-folder:".length)),
-          );
+          ]);
           return;
         }
         if (clicked.value?.startsWith("snooze:")) {
@@ -4823,7 +4666,7 @@ export default function Sidebar() {
       copyThreadIdToClipboard,
       deleteThread,
       handleMultiSelectContextMenu,
-      moveOrganizationItem,
+      applyOrganizationFolderChoice,
       activeWorkspace,
       markThreadUnread,
       openProjectSettings,
@@ -4966,62 +4809,23 @@ export default function Sidebar() {
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
           <SidebarGroup className="z-[1]">
-            {primaryEnvironmentId !== null ? (
-              <div className="mb-1 flex min-w-0 items-center gap-2 px-2">
-                {activeWorkspace === null ? (
-                  <span className="min-w-0 flex-1 truncate text-xs text-sidebar-muted-foreground">
-                    No workspaces
-                  </span>
-                ) : (
-                  <>
-                    <label htmlFor="organization-workspace" className="sr-only">
-                      Workspace
-                    </label>
-                    <select
-                      id="organization-workspace"
-                      value={activeWorkspace.workspace.id}
-                      onChange={(event) =>
-                        setActiveWorkspaceId(
-                          OrganizationWorkspaceId.make(event.currentTarget.value),
-                        )
-                      }
-                      className="h-7 min-w-0 flex-1 rounded-md border border-sidebar-border bg-sidebar px-2 text-xs text-sidebar-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {orderedWorkspaces.map((workspace) => (
-                        <option key={workspace.id} value={workspace.id}>
-                          {workspace.name}
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      title="Create folder"
-                      aria-label="Create folder"
-                      onClick={() => void handleCreateOrganizationFolder()}
-                    >
-                      <FolderPlusIcon />
-                    </Button>
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      title="Manage workspace"
-                      aria-label="Manage workspace"
-                      onClick={handleManageOrganizationWorkspace}
-                    >
-                      <SettingsIcon />
-                    </Button>
-                  </>
-                )}
-                <Button
-                  size="icon-xs"
-                  variant="ghost-muted"
-                  title="Create workspace"
-                  aria-label="Create workspace"
-                  onClick={() => void handleCreateOrganizationWorkspace()}
-                >
-                  <PlusIcon />
-                </Button>
+            {organizationWorkspaces.available && activeWorkspace !== null ? (
+              <div className="mb-2">
+                <SidebarWorkspaceSwitcher
+                  workspaces={organizationWorkspaces.workspaces}
+                  activeWorkspace={activeWorkspace}
+                  onSelectWorkspace={organizationWorkspaces.setActiveWorkspaceId}
+                  onCreateWorkspace={() => void organizationWorkspaces.createWorkspace()}
+                  onEditWorkspace={(workspace) =>
+                    void organizationWorkspaces.editWorkspace(workspace)
+                  }
+                  onDeleteWorkspace={(workspace) =>
+                    void organizationWorkspaces.deleteWorkspace(workspace)
+                  }
+                  onCreateFolder={() => void organizationWorkspaces.createFolder()}
+                  onRenameFolder={(folder) => void organizationWorkspaces.renameFolder(folder)}
+                  onDeleteFolder={(folder) => void organizationWorkspaces.deleteFolder(folder)}
+                />
               </div>
             ) : null}
             <SidebarThreadHeader

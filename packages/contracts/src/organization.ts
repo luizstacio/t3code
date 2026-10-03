@@ -13,11 +13,33 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
+import { ProjectIconColor } from "./project.ts";
 import { ApplicationEventMetadata } from "./applicationEvent.ts";
+
+/**
+ * The workspace thumbnail. Absent means the name's initials. Shares the
+ * project icon vocabulary so both pickers offer the same icons and emoji.
+ */
+export const OrganizationWorkspaceIcon = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("lucide"),
+    name: TrimmedNonEmptyString.check(
+      Schema.isMaxLength(64),
+      Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    ),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("emoji"),
+    emoji: TrimmedNonEmptyString.check(Schema.isMaxLength(32)),
+  }),
+]);
+export type OrganizationWorkspaceIcon = typeof OrganizationWorkspaceIcon.Type;
 
 export const OrganizationWorkspace = Schema.Struct({
   id: OrganizationWorkspaceId,
   name: TrimmedNonEmptyString,
+  color: Schema.optional(ProjectIconColor),
+  icon: Schema.optional(OrganizationWorkspaceIcon),
   orderKey: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -77,6 +99,8 @@ export const OrganizationMutation = Schema.Union([
     commandId: CommandId,
     workspaceId: OrganizationWorkspaceId,
     name: TrimmedNonEmptyString,
+    color: Schema.optional(ProjectIconColor),
+    icon: Schema.optional(OrganizationWorkspaceIcon),
     orderKey: TrimmedNonEmptyString,
   }),
   Schema.Struct({
@@ -84,6 +108,9 @@ export const OrganizationMutation = Schema.Union([
     commandId: CommandId,
     workspaceId: OrganizationWorkspaceId,
     name: Schema.optional(TrimmedNonEmptyString),
+    /** Null clears the field; absent leaves it unchanged. */
+    color: Schema.optional(Schema.NullOr(ProjectIconColor)),
+    icon: Schema.optional(Schema.NullOr(OrganizationWorkspaceIcon)),
     orderKey: Schema.optional(TrimmedNonEmptyString),
   }),
   Schema.Struct({
@@ -157,6 +184,8 @@ export const ApplicationOrganizationEvent = Schema.Union([
     payload: Schema.Struct({
       workspaceId: OrganizationWorkspaceId,
       name: Schema.optional(TrimmedNonEmptyString),
+      color: Schema.optional(Schema.NullOr(ProjectIconColor)),
+      icon: Schema.optional(Schema.NullOr(OrganizationWorkspaceIcon)),
       orderKey: Schema.optional(TrimmedNonEmptyString),
       updatedAt: IsoDateTime,
     }),

@@ -58,6 +58,7 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  LayersIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -220,6 +221,8 @@ import type { Project } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { usePrimaryOrganizationState } from "../state/organization";
+import { useOrganizationWorkspaces } from "../hooks/useOrganizationWorkspaceActions";
+import { WorkspaceAvatar } from "./organization/WorkspaceAvatar";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -832,21 +835,15 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const savedOrganizationWorkspaceId = useUiStateStore(
-    (store) => store.activeOrganizationWorkspaceId,
-  );
-  const setActiveOrganizationWorkspaceId = useUiStateStore(
-    (store) => store.setActiveOrganizationWorkspaceId,
-  );
-  const organization = usePrimaryOrganizationState();
-  const organizationWorkspaces = useMemo(
-    () => sortOrganizationWorkspaces(organization.workspaces),
-    [organization.workspaces],
-  );
-  const activeOrganizationWorkspaceId =
-    organizationWorkspaces.find(({ id }) => id === savedOrganizationWorkspaceId)?.id ??
-    organizationWorkspaces[0]?.id ??
-    null;
+  const {
+    available: organizationAvailable,
+    workspaces: organizationWorkspaces,
+    activeWorkspace: activeOrganizationWorkspace,
+    activeWorkspaceId: activeOrganizationWorkspaceId,
+    setActiveWorkspaceId: setActiveOrganizationWorkspaceId,
+    createWorkspace: createOrganizationWorkspace,
+    createFolder: createOrganizationFolder,
+  } = useOrganizationWorkspaces();
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const {
@@ -1996,8 +1993,8 @@ function OpenCommandPaletteDialog(props: {
       value: "action:switch-organization-workspace",
       searchTerms: ["switch", "workspace", "organization", "team"],
       title: "Switch workspace",
-      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
-      addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
+      icon: <LayersIcon className={ITEM_ICON_CLASS} />,
+      addonIcon: <LayersIcon className={ADDON_ICON_CLASS} />,
       shortcutCommand: "organizationWorkspace.picker",
       groups: [
         {
@@ -2010,11 +2007,18 @@ function OpenCommandPaletteDialog(props: {
               value: `organization-workspace:${workspace.id}`,
               title: workspace.name,
               searchTerms: [workspace.name, "workspace", "organization", "team"],
-              icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+              icon: (
+                <WorkspaceAvatar
+                  name={workspace.name}
+                  color={workspace.color}
+                  icon={workspace.icon}
+                  size="sm"
+                />
+              ),
               ...(shortcutCommand ? { shortcutCommand } : {}),
               titleTrailingContent:
                 workspace.id === activeOrganizationWorkspaceId ? (
-                  <span className="text-xs text-muted-foreground/70">Current</span>
+                  <CheckIcon className="size-3.5 text-muted-foreground" aria-label="Current" />
                 ) : undefined,
               run: async () => {
                 setActiveOrganizationWorkspaceId(workspace.id);
@@ -2033,7 +2037,7 @@ function OpenCommandPaletteDialog(props: {
         value: `action:${direction}-organization-workspace`,
         searchTerms: [direction, "workspace", "organization", "team"],
         title: `${direction === "previous" ? "Previous" : "Next"} workspace`,
-        icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+        icon: <LayersIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: `organizationWorkspace.${direction}`,
         run: async () => {
           setActiveOrganizationWorkspaceId(
@@ -2046,6 +2050,28 @@ function OpenCommandPaletteDialog(props: {
         },
       });
     }
+  }
+
+  if (organizationAvailable) {
+    actionItems.push({
+      kind: "action",
+      value: "action:new-organization-workspace",
+      searchTerms: ["new", "create", "add", "workspace", "organization", "team"],
+      title: "New workspace",
+      icon: <LayersIcon className={ITEM_ICON_CLASS} />,
+      run: createOrganizationWorkspace,
+    });
+  }
+
+  if (activeOrganizationWorkspace !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:new-organization-folder",
+      searchTerms: ["new", "create", "add", "folder", activeOrganizationWorkspace.workspace.name],
+      title: `New folder in ${activeOrganizationWorkspace.workspace.name}`,
+      icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+      run: createOrganizationFolder,
+    });
   }
 
   if (activeThreadReferenceCopyTarget !== null) {

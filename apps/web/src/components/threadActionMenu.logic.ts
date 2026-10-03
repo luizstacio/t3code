@@ -10,8 +10,10 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "filter-by-project"
   | "project-settings"
-  | "organization-folder"
-  | `organization-folder:${string}`
+  | typeof ORGANIZATION_FOLDER_MENU_ID
+  | typeof ORGANIZATION_FOLDER_MENU_CREATE_ID
+  | typeof ORGANIZATION_FOLDER_MENU_REMOVE_ID
+  | `${typeof ORGANIZATION_FOLDER_MENU_PREFIX}${string}`
   | "pin"
   | "unpin"
   | "settle"
@@ -32,6 +34,60 @@ export type ThreadActionMenuId =
   | "archive"
   | "delete";
 
+export const ORGANIZATION_FOLDER_MENU_ID = "organization-folder";
+export const ORGANIZATION_FOLDER_MENU_PREFIX = "organization-folder:";
+export const ORGANIZATION_FOLDER_MENU_CREATE_ID = "organization-folder-create";
+export const ORGANIZATION_FOLDER_MENU_REMOVE_ID = "organization-folder-remove";
+
+export interface OrganizationFolderMenuOption {
+  readonly id: string;
+  readonly label: string;
+  readonly checked: boolean;
+}
+
+/**
+ * "Move to folder" for any item in the active workspace. Always offers a new
+ * folder, so filing works before the first folder exists, and offers the way
+ * back out once the item sits in one.
+ */
+export function buildOrganizationFolderMenu(
+  folders: ReadonlyArray<OrganizationFolderMenuOption>,
+): ContextMenuItem<
+  | typeof ORGANIZATION_FOLDER_MENU_ID
+  | typeof ORGANIZATION_FOLDER_MENU_CREATE_ID
+  | typeof ORGANIZATION_FOLDER_MENU_REMOVE_ID
+  | `${typeof ORGANIZATION_FOLDER_MENU_PREFIX}${string}`
+> {
+  const filed = folders.some((folder) => folder.checked);
+  return {
+    id: ORGANIZATION_FOLDER_MENU_ID,
+    label: "Move to folder",
+    icon: "folder-tree",
+    children: [
+      ...folders.map((folder) => ({
+        id: `${ORGANIZATION_FOLDER_MENU_PREFIX}${folder.id}` as const,
+        label: folder.label,
+        checked: folder.checked,
+      })),
+      {
+        id: ORGANIZATION_FOLDER_MENU_CREATE_ID as typeof ORGANIZATION_FOLDER_MENU_CREATE_ID,
+        label: "New folder…",
+        icon: "folder-plus",
+        separatorBefore: folders.length > 0,
+      },
+      ...(filed
+        ? [
+            {
+              id: ORGANIZATION_FOLDER_MENU_REMOVE_ID as typeof ORGANIZATION_FOLDER_MENU_REMOVE_ID,
+              label: "Remove from folder",
+              icon: "folder-minus",
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
 export interface ThreadActionMenuState {
   readonly branch: string | null;
   /**
@@ -43,11 +99,8 @@ export interface ThreadActionMenuState {
     /** True when the list is already scoped to this thread's project. */
     readonly isActive: boolean;
   } | null;
-  readonly organizationFolders?: ReadonlyArray<{
-    readonly id: string;
-    readonly label: string;
-    readonly checked: boolean;
-  }>;
+  /** Folders of the active workspace; absent when no workspace exists. */
+  readonly organizationFolders?: ReadonlyArray<OrganizationFolderMenuOption>;
   readonly isPinned: boolean;
   readonly isSettled: boolean;
   /** False while the user has turned automatic settlement off for this thread. */
@@ -145,20 +198,7 @@ export function buildThreadActionMenuItems(
           },
         ]
       : []),
-    ...(state.organizationFolders?.length
-      ? [
-          {
-            id: "organization-folder" as const,
-            label: "Move to folder",
-            icon: "folder-tree",
-            children: state.organizationFolders.map((folder) => ({
-              id: `organization-folder:${folder.id}` as const,
-              label: folder.label,
-              checked: folder.checked,
-            })),
-          },
-        ]
-      : []),
+    ...(state.organizationFolders ? [buildOrganizationFolderMenu(state.organizationFolders)] : []),
     // A submenu with the current option checked, not a one-shot action:
     // this is a setting, and it sits with the other per-thread settings
     // rather than the lifecycle verbs above. Disabled keeps long-running

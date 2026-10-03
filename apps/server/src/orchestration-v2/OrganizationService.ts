@@ -1,5 +1,4 @@
 import {
-  type ApplicationOrganizationEvent,
   type EventId,
   OrganizationMutation,
   OrganizationMutationError,
@@ -53,6 +52,8 @@ export function planOrganizationMutation(input: {
           workspace: {
             id: mutation.workspaceId,
             name: mutation.name,
+            ...(mutation.color === undefined ? {} : { color: mutation.color }),
+            ...(mutation.icon === undefined ? {} : { icon: mutation.icon }),
             orderKey: mutation.orderKey,
             createdAt: occurredAt,
             updatedAt: occurredAt,
@@ -68,6 +69,8 @@ export function planOrganizationMutation(input: {
         payload: {
           workspaceId: mutation.workspaceId,
           ...(mutation.name === undefined ? {} : { name: mutation.name }),
+          ...(mutation.color === undefined ? {} : { color: mutation.color }),
+          ...(mutation.icon === undefined ? {} : { icon: mutation.icon }),
           ...(mutation.orderKey === undefined ? {} : { orderKey: mutation.orderKey }),
           updatedAt: occurredAt,
         },

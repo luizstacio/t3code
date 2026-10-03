@@ -24,18 +24,20 @@ export function applyOrganizationEvent(
     case "organization.workspace-updated":
       return {
         ...state,
-        workspaces: state.workspaces.map((workspace) =>
-          workspace.id === event.payload.workspaceId
-            ? {
-                ...workspace,
-                ...(event.payload.name === undefined ? {} : { name: event.payload.name }),
-                ...(event.payload.orderKey === undefined
-                  ? {}
-                  : { orderKey: event.payload.orderKey }),
-                updatedAt: event.payload.updatedAt,
-              }
-            : workspace,
-        ),
+        workspaces: state.workspaces.map((workspace) => {
+          if (workspace.id !== event.payload.workspaceId) return workspace;
+          const { color, icon, ...rest } = workspace;
+          const nextColor = event.payload.color === undefined ? color : event.payload.color;
+          const nextIcon = event.payload.icon === undefined ? icon : event.payload.icon;
+          return {
+            ...rest,
+            ...(event.payload.name === undefined ? {} : { name: event.payload.name }),
+            ...(nextColor == null ? {} : { color: nextColor }),
+            ...(nextIcon == null ? {} : { icon: nextIcon }),
+            ...(event.payload.orderKey === undefined ? {} : { orderKey: event.payload.orderKey }),
+            updatedAt: event.payload.updatedAt,
+          };
+        }),
       };
     case "organization.workspace-deleted": {
       const folderIds = new Set(

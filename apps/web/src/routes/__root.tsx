@@ -19,6 +19,8 @@ import { resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
+import { OrganizationNameDialogHost } from "../components/OrganizationNameDialog";
+import { WorkspaceAppearanceDialogHost } from "../components/organization/WorkspaceAppearanceDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
 import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
@@ -180,6 +182,8 @@ function RootRouteView() {
           <FontAppearanceSync />
           <ProviderAuthCallbackCoordinator />
           <CustomSnoozeDialogHost />
+          <OrganizationNameDialogHost />
+          <WorkspaceAppearanceDialogHost />
           <CommandPalette>
             <AppSidebarLayout>
               <Outlet />
@@ -235,6 +239,8 @@ function RootRouteView() {
           <ThreadNotificationCoordinator />
           <ConfirmDialogHost />
           <CustomSnoozeDialogHost />
+          <OrganizationNameDialogHost />
+          <WorkspaceAppearanceDialogHost />
           <SlowRpcRequestToastCoordinator />
           {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
           <ProjectCloneToastCoordinator />

@@ -79,10 +79,21 @@ describe("buildThreadActionMenuItems", () => {
         { id: "later", label: "Later", checked: false },
       ],
     }).find((item) => item.id === "organization-folder");
-    expect(move?.children).toEqual([
-      { id: "organization-folder:active", label: "Active", checked: true },
-      { id: "organization-folder:later", label: "Later", checked: false },
+    expect(move?.children?.map((item) => item.id)).toEqual([
+      "organization-folder:active",
+      "organization-folder:later",
+      "organization-folder-create",
+      "organization-folder-remove",
     ]);
+    expect(move?.children?.[0]).toMatchObject({ label: "Active", checked: true });
+  });
+
+  it("lets an unfiled thread start the first folder but not leave one", () => {
+    const move = buildThreadActionMenuItems({
+      ...baseState,
+      organizationFolders: [],
+    }).find((item) => item.id === "organization-folder");
+    expect(move?.children?.map((item) => item.id)).toEqual(["organization-folder-create"]);
   });
 
   it("offers the way back to all projects once the list is scoped", () => {

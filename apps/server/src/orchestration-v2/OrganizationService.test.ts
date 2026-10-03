@@ -58,6 +58,62 @@ describe("organization mutations", () => {
     ]);
   });
 
+  it("keeps a workspace's color and icon, and clears them on request", () => {
+    const workspaceId = OrganizationWorkspaceId.make("workspace");
+    const created = applyOrganizationEvent(
+      EMPTY_ORGANIZATION_STATE,
+      committed(
+        Effect.runSync(
+          plan({
+            type: "organization.workspace.create",
+            commandId,
+            workspaceId,
+            name: "Team",
+            color: "blue",
+            icon: { kind: "lucide", name: "rocket" },
+            orderKey: "a",
+          }),
+        ),
+      ),
+    );
+    assert.strictEqual(created.workspaces[0]?.color, "blue");
+    assert.deepStrictEqual(created.workspaces[0]?.icon, { kind: "lucide", name: "rocket" });
+
+    const renamed = applyOrganizationEvent(
+      created,
+      committed(
+        Effect.runSync(
+          plan(
+            { type: "organization.workspace.update", commandId, workspaceId, name: "Crew" },
+            created,
+          ),
+        ),
+      ),
+    );
+    assert.strictEqual(renamed.workspaces[0]?.color, "blue");
+
+    const cleared = applyOrganizationEvent(
+      renamed,
+      committed(
+        Effect.runSync(
+          plan(
+            {
+              type: "organization.workspace.update",
+              commandId,
+              workspaceId,
+              color: null,
+              icon: { kind: "emoji", emoji: "🚀" },
+            },
+            renamed,
+          ),
+        ),
+      ),
+    );
+    assert.strictEqual(cleared.workspaces[0]?.color, undefined);
+    assert.ok(!("color" in cleared.workspaces[0]!));
+    assert.deepStrictEqual(cleared.workspaces[0]?.icon, { kind: "emoji", emoji: "🚀" });
+  });
+
   it("rejects a folder whose workspace does not exist", () => {
     const exit = Effect.runSyncExit(
       plan({

@@ -14,6 +14,8 @@ import {
   type OrganizationItemReference,
   type OrganizationMembershipId,
   type OrganizationMutation,
+  type OrganizationWorkspaceIcon,
+  type ProjectIconColor,
   type OrganizationWorkspaceId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
@@ -73,11 +75,16 @@ export interface DeleteProjectInput extends CommandMetadata {
 export interface CreateOrganizationWorkspaceInput extends CommandMetadata {
   readonly workspaceId: OrganizationWorkspaceId;
   readonly name: string;
+  readonly color?: ProjectIconColor;
+  readonly icon?: OrganizationWorkspaceIcon;
   readonly orderKey: string;
 }
 export interface UpdateOrganizationWorkspaceInput extends CommandMetadata {
   readonly workspaceId: OrganizationWorkspaceId;
   readonly name?: string;
+  /** Null clears the color; absent leaves it unchanged. */
+  readonly color?: ProjectIconColor | null;
+  readonly icon?: OrganizationWorkspaceIcon | null;
   readonly orderKey?: string;
   readonly updatedAt?: string;
 }
@@ -390,6 +397,8 @@ export const createOrganizationWorkspace = Effect.fn(
     commandId: yield* allocateCommandId(input),
     workspaceId: input.workspaceId,
     name: input.name,
+    ...(input.color === undefined ? {} : { color: input.color }),
+    ...(input.icon === undefined ? {} : { icon: input.icon }),
     orderKey: input.orderKey,
   });
 });
@@ -402,6 +411,8 @@ export const updateOrganizationWorkspace = Effect.fn(
     commandId: yield* allocateCommandId(input),
     workspaceId: input.workspaceId,
     ...(input.name === undefined ? {} : { name: input.name }),
+    ...(input.color === undefined ? {} : { color: input.color }),
+    ...(input.icon === undefined ? {} : { icon: input.icon }),
     ...(input.orderKey === undefined ? {} : { orderKey: input.orderKey }),
   });
 });
