@@ -12,6 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   adjacentOrganizationWorkspaceId,
   filterOrganizationWorkspaceContent,
+  resolveOrganizationThreadFolders,
   selectOrganizationWorkspace,
 } from "./organization.ts";
 
@@ -170,5 +171,59 @@ describe("filterOrganizationWorkspaceContent", () => {
     });
     expect(first.projects.map(({ id }) => id)).toEqual(["project-2"]);
     expect(first.threads.map(({ id }) => id)).toEqual(["thread-3"]);
+  });
+});
+
+describe("resolveOrganizationThreadFolders", () => {
+  it("files threads by their own membership first, then by their project's", () => {
+    const view = selectOrganizationWorkspace(state, OrganizationWorkspaceId.make("agents"))!;
+    const withThreadInOtherFolder = {
+      ...view,
+      folders: view.folders.map((entry) =>
+        entry.folder.id === "later-folder"
+          ? {
+              ...entry,
+              memberships: [
+                {
+                  id: OrganizationMembershipId.make("override"),
+                  folderId: OrganizationFolderId.make("later-folder"),
+                  item: {
+                    kind: "thread" as const,
+                    environmentId: EnvironmentId.make("linux-a"),
+                    threadId: ThreadId.make("thread-4"),
+                  },
+                  orderKey: "a",
+                  createdAt: at,
+                  updatedAt: at,
+                },
+              ],
+            }
+          : entry,
+      ),
+    };
+    const folders = resolveOrganizationThreadFolders(withThreadInOtherFolder, [
+      // Filed through project-1's membership.
+      {
+        environmentId: EnvironmentId.make("linux-a"),
+        id: ThreadId.make("thread-3"),
+        projectId: ProjectId.make("project-1"),
+      },
+      // Also in project-1, but filed on its own elsewhere.
+      {
+        environmentId: EnvironmentId.make("linux-a"),
+        id: ThreadId.make("thread-4"),
+        projectId: ProjectId.make("project-1"),
+      },
+      // Unfiled.
+      {
+        environmentId: EnvironmentId.make("linux-a"),
+        id: ThreadId.make("thread-5"),
+        projectId: ProjectId.make("project-2"),
+      },
+    ]);
+    expect(Object.fromEntries(folders)).toEqual({
+      "linux-a:thread-3": "first-folder",
+      "linux-a:thread-4": "later-folder",
+    });
   });
 });

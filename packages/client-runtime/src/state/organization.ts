@@ -1,6 +1,7 @@
 import type {
   EnvironmentId,
   OrganizationFolder,
+  OrganizationFolderId,
   OrganizationMembership,
   OrganizationState,
   OrganizationWorkspace,
@@ -93,6 +94,39 @@ export function selectOrganizationWorkspace(
       memberships: [...(membershipsByFolder.get(folder.id) ?? [])].sort(compareOrder),
     })),
   };
+}
+
+/**
+ * The folder each thread sits in within one workspace. A thread filed on its
+ * own wins over its project's folder; threads of a filed project follow it.
+ */
+export function resolveOrganizationThreadFolders(
+  workspace: OrganizationWorkspaceView,
+  threads: ReadonlyArray<Pick<EnvironmentThreadShell, "environmentId" | "id" | "projectId">>,
+): ReadonlyMap<string, OrganizationFolderId> {
+  const folderByThreadKey = new Map<string, OrganizationFolderId>();
+  const folderByProjectKey = new Map<string, OrganizationFolderId>();
+  for (const { folder, memberships } of workspace.folders) {
+    for (const membership of memberships) {
+      if (membership.item.kind === "thread") {
+        folderByThreadKey.set(scopedThreadKey(membership.item), folder.id);
+      } else {
+        folderByProjectKey.set(scopedProjectKey(membership.item), folder.id);
+      }
+    }
+  }
+  const result = new Map<string, OrganizationFolderId>();
+  if (folderByThreadKey.size === 0 && folderByProjectKey.size === 0) return result;
+  for (const thread of threads) {
+    const threadKey = scopedThreadKey({ environmentId: thread.environmentId, threadId: thread.id });
+    const folderId =
+      folderByThreadKey.get(threadKey) ??
+      folderByProjectKey.get(
+        scopedProjectKey({ environmentId: thread.environmentId, projectId: thread.projectId }),
+      );
+    if (folderId !== undefined) result.set(threadKey, folderId);
+  }
+  return result;
 }
 
 export function filterOrganizationWorkspaceContent(input: {

@@ -31,7 +31,10 @@ import {
   effectiveSnoozed,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
-import { filterOrganizationWorkspaceContent } from "@t3tools/client-runtime/state/organization";
+import {
+  filterOrganizationWorkspaceContent,
+  resolveOrganizationThreadFolders,
+} from "@t3tools/client-runtime/state/organization";
 import {
   resolveSettledThreadTimestamp,
   sortSettledThreads,
@@ -53,6 +56,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   OrganizationFolderId,
+  type OrganizationFolder,
   type OrganizationItemReference,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
@@ -71,6 +75,7 @@ import {
   ClockIcon,
   EyeIcon,
   FolderIcon,
+  FolderOpenIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
@@ -292,6 +297,20 @@ import {
 // Settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map();
+const EMPTY_FOLDER_BY_THREAD_KEY: ReadonlyMap<string, OrganizationFolderId> = new Map();
+// Folder ids are UUIDs, so one local-storage list per browser stays small.
+const COLLAPSED_FOLDERS_KEY = "t3code:sidebar:collapsed-folders";
+const FOLDER_DROP_ATTRIBUTE = "data-sidebar-folder-drop";
+const FOLDER_DROP_OVER_ATTRIBUTE = "data-sidebar-folder-over";
+
+/** The folder under the pointer while a thread is dragged out of the shelves. */
+function folderDropTargetAt(point: { x: number; y: number }): HTMLElement | null {
+  return (
+    document
+      .elementFromPoint(point.x, point.y)
+      ?.closest<HTMLElement>(`[${FOLDER_DROP_ATTRIBUTE}]`) ?? null
+  );
+}
 // Collapsed shelves share one empty list so a route change alone does not
 // give the sidebar list a new identity.
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
@@ -823,6 +842,65 @@ function SidebarSectionHeader(props: {
         {props.label}
       </CollapsibleSectionHeader>
     </SortableSidebarMarker>
+  );
+}
+
+// A workspace folder: a collapsible header over the threads filed in it.
+// The header doubles as a drop target for threads dragged from the shelves.
+function SidebarFolderSection(props: {
+  folder: OrganizationFolder;
+  count: number;
+  expanded: boolean;
+  onToggle: (folderId: OrganizationFolderId) => void;
+  onContextMenu: (event: ReactMouseEvent<HTMLElement>, folder: OrganizationFolder) => void;
+  children: ReactNode;
+}) {
+  const { folder, onContextMenu, onToggle } = props;
+  return (
+    <li
+      role="presentation"
+      className="flex flex-col gap-px rounded-md in-data-[sidebar-folder-over]:bg-sidebar-row-hover in-data-[sidebar-folder-over]:ring-1 in-data-[sidebar-folder-over]:ring-primary/60"
+      {...{ [FOLDER_DROP_ATTRIBUTE]: folder.id }}
+      data-testid="sidebar-folder"
+    >
+      <div
+        className="mx-0.5"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onContextMenu(event, folder);
+        }}
+      >
+        <CollapsibleSectionHeader
+          expanded={props.expanded}
+          onClick={() => onToggle(folder.id)}
+          accessory={
+            <span className="shrink-0 text-3xs tabular-nums text-sidebar-muted-foreground/60">
+              {props.count}
+            </span>
+          }
+        >
+          <span className="flex min-w-0 items-center gap-1.5">
+            {props.expanded ? (
+              <FolderOpenIcon aria-hidden className="size-3.5 shrink-0" />
+            ) : (
+              <FolderIcon aria-hidden className="size-3.5 shrink-0" />
+            )}
+            <span className="truncate">{folder.name}</span>
+          </span>
+        </CollapsibleSectionHeader>
+      </div>
+      {props.expanded ? (
+        props.count > 0 ? (
+          <ul role="presentation" className="flex flex-col gap-px">
+            {props.children}
+          </ul>
+        ) : (
+          <p className="px-2 pb-1 text-2xs text-sidebar-muted-foreground/60">
+            Drag threads here, or use Move to folder.
+          </p>
+        )
+      ) : null}
+    </li>
   );
 }
 
@@ -2695,6 +2773,32 @@ export default function Sidebar() {
     },
     [moveItemToFolder, organizationWorkspaces, removeItemFromFolder],
   );
+  const handleFolderContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLElement>, folder: OrganizationFolder) => {
+      void (async () => {
+        const api = readLocalApi();
+        if (!api) return;
+        const clicked = await api.contextMenu.show(
+          [
+            { id: "folder:rename", label: "Rename folder…", icon: "pencil" },
+            { id: "folder:create", label: "New folder…", icon: "folder-plus" },
+            {
+              id: "folder:delete",
+              label: "Delete folder…",
+              icon: "trash",
+              destructive: true,
+              separatorBefore: true,
+            },
+          ],
+          { x: event.clientX, y: event.clientY },
+        );
+        if (clicked === "folder:rename") await organizationWorkspaces.renameFolder(folder);
+        else if (clicked === "folder:create") await organizationWorkspaces.createFolder();
+        else if (clicked === "folder:delete") await organizationWorkspaces.deleteFolder(folder);
+      })();
+    },
+    [organizationWorkspaces],
+  );
   const handleProjectContextMenu = useCallback(
     (event: ReactMouseEvent<HTMLElement>, projectGroup: SidebarProjectSnapshot) => {
       event.preventDefault();
@@ -2762,6 +2866,46 @@ export default function Sidebar() {
         override holds until all of them appear in canonical state. */
     readonly assignedKeys: ReadonlyMap<string, string>;
   } | null>(null);
+  // Threads filed in a folder of the active workspace render under that
+  // folder instead of in the lifecycle shelves, so each thread shows once.
+  const folderByThreadKey = useMemo(
+    () =>
+      activeWorkspace === null
+        ? EMPTY_FOLDER_BY_THREAD_KEY
+        : resolveOrganizationThreadFolders(activeWorkspace, threads),
+    [activeWorkspace, threads],
+  );
+  const shelfThreads = useMemo(
+    () =>
+      folderByThreadKey.size === 0
+        ? threads
+        : threads.filter(
+            (thread) =>
+              !folderByThreadKey.has(
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+              ),
+          ),
+    [folderByThreadKey, threads],
+  );
+  const folderSections = useMemo(() => {
+    if (activeWorkspace === null || activeWorkspace.folders.length === 0) return [];
+    const byFolder = new Map<string, EnvironmentThreadShell[]>();
+    if (folderByThreadKey.size > 0) {
+      for (const thread of filterSidebarV2VisibleThreads(threads, scopedProjectKeys)) {
+        const folderId = folderByThreadKey.get(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        );
+        if (folderId === undefined) continue;
+        const list = byFolder.get(folderId) ?? [];
+        list.push(thread);
+        byFolder.set(folderId, list);
+      }
+    }
+    return activeWorkspace.folders.map(({ folder }) => ({
+      folder,
+      threads: sortThreadsForSidebar(byFolder.get(folder.id) ?? []),
+    }));
+  }, [activeWorkspace, folderByThreadKey, scopedProjectKeys, threads]);
   const {
     pinnedThreads,
     draggableThreadKeys,
@@ -2780,8 +2924,8 @@ export default function Sidebar() {
     const preciseNow = new Date().toISOString();
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
-    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
-    observeInboxReturns(workingShelfEnabled ? threads : null);
+    const visible = filterSidebarV2VisibleThreads(shelfThreads, scopedProjectKeys);
+    observeInboxReturns(workingShelfEnabled ? shelfThreads : null);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
     const working: EnvironmentThreadShell[] = [];
@@ -2889,8 +3033,8 @@ export default function Sidebar() {
     optimisticDrop,
     scopedProjectKeys,
     serverConfigs,
+    shelfThreads,
     snoozeWakeTick,
-    threads,
     workingShelfEnabled,
   ]);
 
@@ -2995,6 +3139,19 @@ export default function Sidebar() {
     SETTLED_SHELF_EXPANDED_KEY,
     false,
     Schema.Boolean,
+  );
+  const [collapsedFolderIds, setCollapsedFolderIds] = useLocalStorage(
+    COLLAPSED_FOLDERS_KEY,
+    [] as ReadonlyArray<string>,
+    Schema.Array(Schema.String),
+  );
+  const collapsedFolderIdSet = useMemo(() => new Set(collapsedFolderIds), [collapsedFolderIds]);
+  const toggleFolder = useCallback(
+    (folderId: OrganizationFolderId) =>
+      setCollapsedFolderIds((ids) =>
+        ids.includes(folderId) ? ids.filter((id) => id !== folderId) : [...ids, folderId],
+      ),
+    [setCollapsedFolderIds],
   );
   const toggleSettledShelf = useCallback(
     () => setSettledShelfExpanded((value) => !value),
@@ -3455,15 +3612,30 @@ export default function Sidebar() {
   const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
   const contextDragKeyRef = useRef<string | null>(null);
-  const finishThreadDrag = useCallback((started: boolean) => {
-    dragSensorRef.current = null;
-    contextDragKeyRef.current = null;
-    endThreadContextDrag();
-    if (started) {
-      listMotionRef.current?.release();
-      setDragState(null);
-    }
+  const moveItemToFolderRef = useRef(moveItemToFolder);
+  useEffect(() => {
+    moveItemToFolderRef.current = moveItemToFolder;
+  }, [moveItemToFolder]);
+  const folderDropOverRef = useRef<HTMLElement | null>(null);
+  const setFolderDropOver = useCallback((target: HTMLElement | null) => {
+    if (folderDropOverRef.current === target) return;
+    folderDropOverRef.current?.removeAttribute(FOLDER_DROP_OVER_ATTRIBUTE);
+    target?.setAttribute(FOLDER_DROP_OVER_ATTRIBUTE, "true");
+    folderDropOverRef.current = target;
   }, []);
+  const finishThreadDrag = useCallback(
+    (started: boolean) => {
+      dragSensorRef.current = null;
+      contextDragKeyRef.current = null;
+      setFolderDropOver(null);
+      endThreadContextDrag();
+      if (started) {
+        listMotionRef.current?.release();
+        setDragState(null);
+      }
+    },
+    [setFolderDropOver],
+  );
   const attachDragSensor = useCallback((sensor: SidebarPointerSensor) => {
     dragSensorRef.current = sensor;
   }, []);
@@ -3482,6 +3654,9 @@ export default function Sidebar() {
     });
   }, []);
   const pointerOutsideThreadList = useCallback((point: { x: number; y: number }) => {
+    // Folder sections render outside the sortable list, so a thread dragged
+    // onto one leaves the sort the same way one dragged to the composer does.
+    if (folderDropTargetAt(point) !== null) return true;
     const bounds = threadListRef.current?.getBoundingClientRect();
     return bounds !== undefined && (point.x < bounds.left || point.x > bounds.right);
   }, []);
@@ -3494,20 +3669,36 @@ export default function Sidebar() {
           : { ...current, contextDrag },
       );
       if (!contextDrag) {
+        setFolderDropOver(null);
         endThreadContextDrag();
         return false;
       }
+      setFolderDropOver(folderDropTargetAt(point));
       const threads = contextDragThreads();
       const title =
         threadByKeyRef.current.get(contextDragKeyRef.current ?? "")?.title.trim() || "Thread";
       moveThreadContextDragGhost(point, { title, count: threads.length });
       return true;
     },
-    [contextDragThreads, pointerOutsideThreadList],
+    [contextDragThreads, pointerOutsideThreadList, setFolderDropOver],
   );
   const dropThreadContextDrag = useCallback(
     (point: { x: number; y: number }) => {
       if (!pointerOutsideThreadList(point)) return false;
+      const folderTarget = folderDropTargetAt(point);
+      const folderId = folderTarget?.getAttribute(FOLDER_DROP_ATTRIBUTE);
+      if (folderId) {
+        const refs = contextDragThreads();
+        void (async () => {
+          for (const ref of refs) {
+            await moveItemToFolderRef.current(
+              { kind: "thread", environmentId: ref.environmentId, threadId: ref.threadId },
+              OrganizationFolderId.make(folderId),
+            );
+          }
+        })();
+        return true;
+      }
       dropThreadContext(point, contextDragThreads());
       // Releasing outside the list never reorders, whether or not a composer took the drop.
       return true;
@@ -5083,7 +5274,7 @@ export default function Sidebar() {
                     role="presentation"
                     className={cn(
                       "relative flex flex-col gap-px",
-                      sidebarListItems.length > 0 && "flex-1",
+                      (sidebarListItems.length > 0 || folderSections.length > 0) && "flex-1",
                     )}
                   >
                     {(() => {
@@ -5235,6 +5426,39 @@ export default function Sidebar() {
                           onNavigateToDraft={navigateToDraft}
                         />,
                       ];
+                      for (const { folder, threads: folderThreads } of folderSections) {
+                        const expanded = !collapsedFolderIdSet.has(folder.id);
+                        // Like the settled shelf, a collapsed folder still shows
+                        // the open thread so the route never points at nothing.
+                        const shown = expanded
+                          ? folderThreads
+                          : folderThreads.filter(
+                              (thread) =>
+                                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) ===
+                                routeThreadKey,
+                            );
+                        items.push(
+                          <SidebarFolderSection
+                            key={`folder:${folder.id}`}
+                            folder={folder}
+                            count={folderThreads.length}
+                            expanded={expanded}
+                            onToggle={toggleFolder}
+                            onContextMenu={handleFolderContextMenu}
+                          >
+                            {shown.map((thread) =>
+                              renderThreadRowInner(
+                                thread,
+                                resolveSidebarThreadSection({
+                                  snoozed: effectiveSnoozed(thread, { now: snoozeNow }),
+                                  settled: thread.settledOverride === "settled",
+                                  pinned: thread.pinnedAt != null,
+                                }),
+                              ),
+                            )}
+                          </SidebarFolderSection>,
+                        );
+                      }
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
@@ -5380,6 +5604,7 @@ export default function Sidebar() {
           ) : null}
           {!isSearchingThreads &&
           visibleDraftSessionCount === 0 &&
+          folderSections.length === 0 &&
           pinnedThreads.length +
             activeThreads.length +
             workingThreads.length +
