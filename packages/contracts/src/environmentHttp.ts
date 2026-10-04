@@ -30,16 +30,22 @@ import {
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
 } from "./environment.ts";
 import {
+  CommandId,
   DpopFailureReason,
   AuthSessionId,
+  MessageId,
+  ProjectId,
+  RunId,
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
 import {
   OrchestrationV2ShellSnapshot,
   OrchestrationV2ThreadBoundedSnapshot,
   OrchestrationV2ThreadDetailSnapshot,
   OrchestrationV2ThreadHistoryPage,
+  OrchestrationV2ThreadLaunchInput,
 } from "./orchestrationV2.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
 import {
@@ -109,6 +115,9 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "orchestration_thread_snapshot_failed",
   "orchestration_thread_bounded_snapshot_failed",
   "orchestration_thread_history_failed",
+  "orchestration_thread_launch_failed",
+  "orchestration_thread_send_failed",
+  "orchestration_thread_interrupt_failed",
   "internal_error",
 ]);
 export type EnvironmentInternalErrorReason = typeof EnvironmentInternalErrorReason.Type;
@@ -516,12 +525,61 @@ const EnvironmentOrchestrationThreadHistoryQuery = Schema.Struct({
   cursor: TrimmedNonEmptyString,
 });
 
-const EnvironmentOrchestrationThreadHistoryErrors = [
+const EnvironmentOrchestrationThreadOperationErrors = [
   EnvironmentRequestInvalidError,
   EnvironmentScopeRequiredError,
   EnvironmentResourceNotFoundError,
   EnvironmentInternalError,
 ] as const;
+
+/**
+ * Thread writes over HTTP, for headless and external agent clients that
+ * cannot hold a WebSocket. They are thin transports over the same
+ * ThreadManagementService/ThreadLaunch paths the WebSocket RPCs use: the
+ * commandId/messageId idempotency rules are identical, so retrying a request
+ * with the same ids is safe.
+ */
+export const EnvironmentThreadSendRequest = Schema.Struct({
+  commandId: CommandId,
+  messageId: MessageId,
+  text: Schema.String,
+  modelSelection: Schema.optional(ModelSelection),
+  /** auto starts or steers per thread state; queue and steer force a mode. */
+  mode: Schema.optional(Schema.Literals(["auto", "queue", "steer", "restart"])),
+});
+export type EnvironmentThreadSendRequest = typeof EnvironmentThreadSendRequest.Type;
+
+export const EnvironmentThreadSendResult = Schema.Struct({
+  threadId: ThreadId,
+  runId: RunId,
+  delivery: Schema.Literals(["started", "queued", "steered", "restarted"]),
+});
+export type EnvironmentThreadSendResult = typeof EnvironmentThreadSendResult.Type;
+
+export const EnvironmentThreadInterruptRequest = Schema.Struct({
+  commandId: CommandId,
+  runId: Schema.optional(RunId),
+  reason: Schema.optional(TrimmedNonEmptyString),
+});
+export type EnvironmentThreadInterruptRequest = typeof EnvironmentThreadInterruptRequest.Type;
+
+export const EnvironmentThreadInterruptResult = Schema.Struct({
+  threadId: ThreadId,
+  outcome: Schema.Literals(["interrupt_requested", "no_active_run", "already_terminal"]),
+});
+export type EnvironmentThreadInterruptResult = typeof EnvironmentThreadInterruptResult.Type;
+
+/**
+ * Launch over HTTP returns the thread id and project id rather than the full
+ * projection the WebSocket variant streams; HTTP callers follow up with the
+ * thread snapshot endpoints to observe progress.
+ */
+export const EnvironmentThreadLaunchResult = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  resumed: Schema.Boolean,
+});
+export type EnvironmentThreadLaunchResult = typeof EnvironmentThreadLaunchResult.Type;
 
 class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestration")
   .add(
@@ -553,7 +611,33 @@ class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestration")
       params: EnvironmentOrchestrationThreadSnapshotParams,
       query: EnvironmentOrchestrationThreadHistoryQuery,
       success: OrchestrationV2ThreadHistoryPage,
-      error: EnvironmentOrchestrationThreadHistoryErrors,
+      error: EnvironmentOrchestrationThreadOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("threadLaunch", "/api/orchestration/threads/launch", {
+      headers: OrchestrationProtocolHeaders,
+      payload: OrchestrationV2ThreadLaunchInput,
+      success: EnvironmentThreadLaunchResult,
+      error: EnvironmentOrchestrationThreadOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("threadSend", "/api/orchestration/threads/:threadId/send", {
+      headers: OrchestrationProtocolHeaders,
+      params: EnvironmentOrchestrationThreadSnapshotParams,
+      payload: EnvironmentThreadSendRequest,
+      success: EnvironmentThreadSendResult,
+      error: EnvironmentOrchestrationThreadOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("threadInterrupt", "/api/orchestration/threads/:threadId/interrupt", {
+      headers: OrchestrationProtocolHeaders,
+      params: EnvironmentOrchestrationThreadSnapshotParams,
+      payload: EnvironmentThreadInterruptRequest,
+      success: EnvironmentThreadInterruptResult,
+      error: EnvironmentOrchestrationThreadOperationErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 

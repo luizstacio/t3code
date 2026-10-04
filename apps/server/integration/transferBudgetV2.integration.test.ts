@@ -40,8 +40,11 @@ import { OrchestrationEventStoreLive } from "../src/persistence/Layers/Orchestra
 import * as EventStore from "../src/orchestration-v2/EventStore.ts";
 import * as EventSink from "../src/orchestration-v2/EventSink.ts";
 import * as ProjectionStore from "../src/orchestration-v2/ProjectionStore.ts";
+import * as ThreadLaunchService from "../src/orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../src/orchestration-v2/ThreadManagementService.ts";
 import * as ProjectStore from "../src/orchestration-v2/ProjectStore.ts";
+import * as ServerConfig from "../src/config.ts";
+import * as ServerRuntimeStartup from "../src/serverRuntimeStartup.ts";
 import * as ProjectService from "../src/project/ProjectService.ts";
 import * as ProjectEnrichmentService from "../src/project/ProjectEnrichmentService.ts";
 import { orchestrationHttpApiLayer } from "../src/orchestration-v2/http.ts";
@@ -108,9 +111,18 @@ const enrichment = Layer.unwrap(
   }),
 );
 // The transfer history has no project events, so shell streams never read a project shell.
+// The thread-write endpoints are outside this measurement; their services are inert mocks.
 const services = management.pipe(
   Layer.provideMerge(ProjectStore.layer),
   Layer.provideMerge(Layer.mock(ProjectService.ProjectService)({})),
+  Layer.provideMerge(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provideMerge(
+    Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({
+      awaitCommandReady: Effect.void,
+      enqueueCommand: (effect) => effect,
+    }),
+  ),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-transfer-budget-" })),
   Layer.provideMerge(enrichment),
   Layer.provideMerge(persistence),
 );
