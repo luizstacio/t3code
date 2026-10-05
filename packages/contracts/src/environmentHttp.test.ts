@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as OpenApi from "effect/unstable/httpapi/OpenApi";
 
 import {
   EnvironmentAuthInvalidError,
+  EnvironmentHttpApi,
   EnvironmentInternalError,
   EnvironmentOperationForbiddenError,
   EnvironmentRequestInvalidError,
@@ -58,5 +60,31 @@ describe("environment HTTP errors", () => {
     errors.forEach((error, index) => {
       expect(error.message).toContain(details[index]);
     });
+  });
+});
+
+describe("EnvironmentHttpApi OpenAPI document", () => {
+  it("generates a document covering the thread lifecycle endpoints", () => {
+    const document = OpenApi.fromApi(EnvironmentHttpApi);
+    expect(Object.keys(document.paths)).toEqual(
+      expect.arrayContaining([
+        "/api/orchestration/threads/launch",
+        "/api/orchestration/threads/{threadId}/send",
+        "/api/orchestration/threads/{threadId}/interrupt",
+      ]),
+    );
+  });
+
+  it("keeps every existing endpoint in the generated document", () => {
+    const document = OpenApi.fromApi(EnvironmentHttpApi);
+    expect(Object.keys(document.paths)).toEqual(
+      expect.arrayContaining([
+        "/.well-known/t3/environment",
+        "/oauth/token",
+        "/api/orchestration/shell",
+        "/api/orchestration/threads/{threadId}",
+        "/api/projects/mutate",
+      ]),
+    );
   });
 });

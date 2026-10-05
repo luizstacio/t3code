@@ -1,4 +1,5 @@
 import {
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
   ThreadId,
@@ -7,6 +8,7 @@ import {
   EMPTY_ORGANIZATION_STATE,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Predicate from "effect/Predicate";
 import * as Option from "effect/Option";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
@@ -30,11 +32,15 @@ import {
   THREAD_HISTORY_PAGE_POLICY,
   OLDER_THREAD_USER_TURN_LIMIT,
 } from "./threadHistoryPaging.ts";
+import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as OrganizationStore from "./OrganizationStore.ts";
 import { buildActiveShellSnapshot } from "./ShellStream.ts";
 import { projectThreadProjectionForWire } from "./WireProjection.ts";
+import * as ServerConfig from "../config.ts";
+import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 
 function isThreadNotFound(error: unknown): boolean {
   return (
@@ -176,7 +182,158 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
       },
     );
 
+    const launchContext = yield* Effect.context<
+      | ThreadManagementService.ThreadManagementService
+      | ThreadLaunchService.ThreadLaunchService
+      | FileSystem.FileSystem
+      | ServerConfig.ServerConfig
+    >();
+    const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
+
+    /** Resolves the owning project or fails with the HTTP not-found error. */
+    const requireThreadShell = Effect.fn("http.orchestration.requireThreadShell")(function* (
+      threadId: ThreadId,
+      failureReason: "orchestration_thread_send_failed" | "orchestration_thread_interrupt_failed",
+    ) {
+      const shell = yield* threadManagement
+        .getThreadShell(threadId)
+        .pipe(Effect.catch((cause) => failEnvironmentInternal(failureReason, cause)));
+      if (shell === null) {
+        return yield* failEnvironmentNotFound("thread_not_found");
+      }
+      return shell;
+    });
+
+    const isThreadManagementNotFound = (error: unknown) =>
+      Predicate.hasProperty(error, "_tag") && error._tag === "ThreadManagementThreadNotFoundError";
+
     return handlers
+      .handle(
+        "threadLaunch",
+        Effect.fn("environment.orchestration.threadLaunch")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          const input = args.payload;
+          const result = yield* startup
+            .enqueueCommand(
+              ThreadMessageIntake.launchThread({
+                commandId: input.commandId,
+                ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+                ...(input.reuseExistingThread === undefined
+                  ? {}
+                  : { reuseExistingThread: input.reuseExistingThread }),
+                projectId: input.projectId,
+                title: input.title,
+                ...(input.generateTitle === undefined
+                  ? {}
+                  : { generateTitle: input.generateTitle }),
+                modelSelection: input.modelSelection,
+                runtimeMode: input.runtimeMode,
+                interactionMode: input.interactionMode,
+                workspaceStrategy: input.workspaceStrategy,
+                ...(input.initialMessage === undefined
+                  ? {}
+                  : {
+                      initialMessage: {
+                        ...(input.initialMessage.messageId === undefined
+                          ? {}
+                          : { messageId: input.initialMessage.messageId }),
+                        text: input.initialMessage.text,
+                        attachments: input.initialMessage.attachments,
+                        ...(input.initialMessage.context === undefined
+                          ? {}
+                          : { context: input.initialMessage.context }),
+                      },
+                    }),
+                createdBy: "user",
+                creationSource: input.creationSource ?? "server",
+              }).pipe(Effect.provide(launchContext)),
+            )
+            .pipe(
+              Effect.catch((cause) =>
+                failEnvironmentInternal("orchestration_thread_launch_failed", cause),
+              ),
+            );
+          return {
+            threadId: result.threadId,
+            projectId: input.projectId,
+            resumed: result.resumed,
+          };
+        }),
+      )
+      .handle(
+        "threadSend",
+        Effect.fn("environment.orchestration.threadSend")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          const threadId = args.params.threadId;
+          const shell = yield* requireThreadShell(threadId, "orchestration_thread_send_failed");
+          const result = yield* startup
+            .enqueueCommand(
+              threadManagement.sendToThread({
+                projectId: shell.projectId,
+                commandId: args.payload.commandId,
+                threadId,
+                messageId: args.payload.messageId,
+                text: args.payload.text,
+                attachments: [],
+                ...(args.payload.modelSelection === undefined
+                  ? {}
+                  : { modelSelection: args.payload.modelSelection }),
+                mode: args.payload.mode ?? "auto",
+                createdBy: "user",
+                creationSource: "server",
+              }),
+            )
+            .pipe(
+              Effect.catch(
+                Effect.fnUntraced(function* (error) {
+                  if (isThreadManagementNotFound(error)) {
+                    return yield* failEnvironmentNotFound("thread_not_found");
+                  }
+                  return yield* failEnvironmentInternal("orchestration_thread_send_failed", error);
+                }),
+              ),
+            );
+          return { threadId, runId: result.run.id, delivery: result.delivery };
+        }),
+      )
+      .handle(
+        "threadInterrupt",
+        Effect.fn("environment.orchestration.threadInterrupt")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          const threadId = args.params.threadId;
+          const shell = yield* requireThreadShell(
+            threadId,
+            "orchestration_thread_interrupt_failed",
+          );
+          const result = yield* startup
+            .enqueueCommand(
+              threadManagement.interruptThread({
+                projectId: shell.projectId,
+                commandId: args.payload.commandId,
+                threadId,
+                ...(args.payload.runId === undefined ? {} : { runId: args.payload.runId }),
+                ...(args.payload.reason === undefined ? {} : { reason: args.payload.reason }),
+              }),
+            )
+            .pipe(
+              Effect.catch(
+                Effect.fnUntraced(function* (error) {
+                  if (isThreadManagementNotFound(error)) {
+                    return yield* failEnvironmentNotFound("thread_not_found");
+                  }
+                  return yield* failEnvironmentInternal(
+                    "orchestration_thread_interrupt_failed",
+                    error,
+                  );
+                }),
+              ),
+            );
+          return { threadId, outcome: result.type };
+        }),
+      )
       .handle(
         "shellSnapshot",
         Effect.fn("environment.orchestration.shellSnapshot")(function* (args) {
