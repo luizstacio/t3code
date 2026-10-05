@@ -383,11 +383,18 @@ jobs:
       # and strip the credential-refresh progress prefix before parsing JSON.
       # Redacted values are persisted as
       # {"__redacted__": "<value>"}; the token is masked before it is written.
+      # Without Cloudflare credentials (forks), client tracing is simply off:
+      # the build treats the tracing variables as optional.
       - name: Read production relay tracing config
         shell: bash
         working-directory: infra/relay
         run: |
           set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo "No Cloudflare credentials; building without relay client tracing."
+            : > "$RUNNER_TEMP/relay-client-tracing.env"
+            exit 0
+          fi
           output="$(npx alchemy state read T3CodeRelay/prod/output --backend cloudflare --log-level error --no-input | sed -n '/^{/,$p')"
           field() {
             jq -er --arg key "$1" '.[$key] | if type == "object" then .__redacted__ else . end | select(. != null and . != "")' <<<"$output" \
@@ -420,6 +427,17 @@ jobs:
           relay_domain="${RELAY_DOMAIN:-}"
           if [[ -z "$relay_domain" && -n "${RELAY_API_ZONE_NAME:-}" ]]; then
             relay_domain="relay.$RELAY_API_ZONE_NAME"
+          fi
+          # Forks without the production repo vars fall back to the public
+          # values in .env.example, the same source the workspace build uses.
+          if [[ -z "$relay_domain" || -z "${CLERK_PUBLISHABLE_KEY:-}" ]]; then
+            set -a
+            source <(grep -E '^T3CODE_' .env.example)
+            set +a
+            relay_domain="${relay_domain:-${T3CODE_RELAY_URL#https://}}"
+            CLERK_PUBLISHABLE_KEY="${CLERK_PUBLISHABLE_KEY:-$T3CODE_CLERK_PUBLISHABLE_KEY}"
+            CLERK_JWT_TEMPLATE="${CLERK_JWT_TEMPLATE:-$T3CODE_CLERK_JWT_TEMPLATE}"
+            CLERK_CLI_OAUTH_CLIENT_ID="${CLERK_CLI_OAUTH_CLIENT_ID:-$T3CODE_CLERK_CLI_OAUTH_CLIENT_ID}"
           fi
           required=(
             relay_domain
