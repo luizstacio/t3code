@@ -91,11 +91,33 @@ jobs:
       arch: arm64
       rust_target: aarch64-apple-darwin
       resource_key: darwin-arm64
-      cli_archive: false
+      cli_archive: true
+
+  linux_cli:
+    name: Build Linux x64 CLI archive
+    needs: bundle
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      version: ${{ needs.bundle.outputs.version }}
+      ref: ${{ github.sha }}
+      release_channel: preview
+      relay_client_tracing: false
+      clerk_publishable_key: ${{ needs.bundle.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.bundle.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.bundle.outputs.clerk_cli_oauth_client_id }}
+      relay_url: ${{ needs.bundle.outputs.relay_url }}
+      label: Linux x64
+      runner: ubuntu-24.04
+      platform: linux
+      target: AppImage
+      arch: x64
+      rust_target: x86_64-unknown-linux-gnu
+      resource_key: linux-x64
+      cli_archive: true
 
   publish:
     name: Publish workspace prerelease
-    needs: [bundle, dmg]
+    needs: [bundle, dmg, linux_cli]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -106,15 +128,28 @@ jobs:
           name: desktop-mac-arm64
           path: release
 
-      - name: Publish DMG
+      - uses: actions/download-artifact@v8
+        with:
+          name: cli-mac-arm64
+          path: release
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: cli-linux-x64
+          path: release
+
+      # The v<version> tag and SHA256SUMS are what scripts/install.sh resolves,
+      # so a remote machine installs this build with T3CODE_CHANNEL=preview.
+      - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.bundle.outputs.version }}
         run: |
-          gh release create "workspace-${GITHUB_RUN_NUMBER}" release/*.dmg \
+          (cd release && sha256sum t3-*.tar.gz > SHA256SUMS)
+          gh release create "v${VERSION}" release/*.dmg release/t3-*.tar.gz release/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "T3 Code workspace ${VERSION}" \
-            --notes "Unsigned Apple-silicon test build from ${GITHUB_SHA}." \
+            --notes "Unsigned workspace test build from ${GITHUB_SHA}." \
             --prerelease
