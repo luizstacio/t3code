@@ -43,8 +43,13 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 
 import { windowsSystemTar } from "./build-cli-archive.ts";
 
-export const NPM_PLATFORM_PACKAGE_SCOPE = "@t3code";
+// GitHub Packages only accepts packages scoped to the repo owner, so the
+// fork publishes under @luizstacio instead of npmjs' @t3code/t3 split. The
+// launcher keeps its unscoped directory and tarball layout; only the
+// manifest names are scoped.
+export const NPM_PLATFORM_PACKAGE_SCOPE = "@luizstacio";
 export const NPM_LAUNCHER_PACKAGE_NAME = "t3";
+export const NPM_LAUNCHER_PUBLISHED_NAME = `${NPM_PLATFORM_PACKAGE_SCOPE}/${NPM_LAUNCHER_PACKAGE_NAME}`;
 
 const encodePackageJson = Schema.encodeEffect(fromJsonStringPretty(Schema.Unknown));
 
@@ -113,6 +118,7 @@ export function npmPlatformPackageManifest(
     os: [os],
     cpu: [cpu],
     files: ["t3", "t3.exe", "client", "resource-monitor", "node_modules"],
+    publishConfig: { registry: "https://npm.pkg.github.com" },
     preferUnplugged: true,
     dependencies: Object.fromEntries(bundleDependencies.map((name) => [name, bundled[name]])),
     bundleDependencies,
@@ -174,13 +180,14 @@ export function npmLauncherPackageManifest(
   platformKeys: ReadonlyArray<CliArchivePlatformKey>,
 ) {
   return {
-    name: NPM_LAUNCHER_PACKAGE_NAME,
+    name: NPM_LAUNCHER_PUBLISHED_NAME,
     version,
     description: "T3 Code CLI. Installs the self-contained executable for this platform.",
     license: serverPackageJson.license,
     repository: serverPackageJson.repository,
     bin: { t3: "./bin/t3.js" },
     files: ["bin", "dist"],
+    publishConfig: { registry: "https://npm.pkg.github.com" },
     optionalDependencies: Object.fromEntries(
       platformKeys.map((key) => [npmPlatformPackageName(key), version]),
     ),

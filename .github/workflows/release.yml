@@ -710,6 +710,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -719,6 +720,15 @@ jobs:
             /*
             !/.repos/
           sparse-checkout-cone-mode: false
+
+      # The packages carry publishConfig.registry = npm.pkg.github.com; this
+      # .npmrc supplies the credential for that registry.
+      - name: Authenticate npm against GitHub Packages
+        shell: bash
+        run: |
+          {
+            echo "//npm.pkg.github.com/:_authToken=${{ github.token }}"
+          } >> "$HOME/.npmrc"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -740,18 +750,18 @@ jobs:
       - name: Build npm packages from CLI archives
         run: node scripts/build-npm-platform-packages.ts --archives-dir release-cli --version "${{ needs.preflight.outputs.version }}" --output-dir npm-packages
 
-      # A dry run of every package first: an auth or scope error here (the
-      # @t3code org missing, a package without a trusted publisher) fails
-      # before anything is live, instead of after some platforms already are.
-      - name: Check npm publish access (dry run)
+      # A dry run of every package first: an auth or scope error fails before
+      # anything is live, instead of after some platforms already are. No
+      # --provenance: GitHub Packages does not support npm provenance.
+      - name: Check publish access (dry run)
         run: |
-          if ! node apps/server/scripts/cli.ts publish --packages-dir npm-packages --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --provenance --dry-run --verbose; then
-            echo "::error::npm publish --dry-run failed. Make sure the @t3code npm org exists and that t3 and every @t3code/t3-<platform> package has a trusted publisher registered for .github/workflows/release.yml (see docs/operations/release.md)." >&2
+          if ! node apps/server/scripts/cli.ts publish --packages-dir npm-packages --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --dry-run --verbose; then
+            echo "::error::npm publish --dry-run against GitHub Packages failed. The workflow token needs packages: write on this repository." >&2
             exit 1
           fi
 
       - name: Publish CLI packages
-        run: node apps/server/scripts/cli.ts publish --packages-dir npm-packages --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --provenance --verbose
+        run: node apps/server/scripts/cli.ts publish --packages-dir npm-packages --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --verbose
 
   release:
     name: Publish GitHub Release

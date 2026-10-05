@@ -10,6 +10,7 @@ import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
+import { NPM_PLATFORM_PACKAGE_SCOPE } from "../../../scripts/build-npm-platform-packages.ts";
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
@@ -192,7 +193,7 @@ const publishCmd = Command.make(
       // npm runs with cwd set to the packages dir below, so tarball paths are
       // resolved once here rather than joined twice.
       const packagesDir = path.resolve(config.packagesDir);
-      const scopeDir = path.join(packagesDir, "@t3code");
+      const scopeDir = path.join(packagesDir, NPM_PLATFORM_PACKAGE_SCOPE);
       const launcherTarball = path.join(packagesDir, "t3.tgz");
       const platformTarballs = (yield* fs
         .readDirectory(scopeDir)
